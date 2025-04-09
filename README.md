@@ -1,6 +1,9 @@
 # <p align="center">Kubernetes for Certified Kubernetes Administrator (CKA)</p>
 
-# Kubernetes Cluster Architecture
+
+# <p align="center">Core Concepts</p>
+
+## Kubernetes Cluster Architecture
 - [Refer Here](https://kubernetes.io/docs/concepts/architecture/) for the Official docs.
 - Kubernetes (K8s) is used to manage containerized applications automatically.
 - It enables easy deployment, scaling, and communication between services.
@@ -18,7 +21,7 @@
 - **Kube Proxy**: Manages networking and enables communication between Pods.
 - **Container Runtime**: Runs containers (Docker, containerd, etc.).
 
-# Docker vs. ContainerD
+## Docker vs. ContainerD
 - Docker and containerd are both container runtimes.
 - Older Kubernetes versions supported Docker, while newer versions use containerd.
 - Several CLI tools exist to interact with these runtimes: `ctr`, `crictl`, `nerdctl`.
@@ -54,7 +57,7 @@
   - Used for **debugging and troubleshooting**, not creating containers.
   - Unlike Docker, `crictl` can manage **pods** (`crictl pods`).
 
-# ETCD
+## ETCD
 - [Refer Here](https://etcd.io/) for the Official site.
 - ETCD is a **distributed, reliable key-value store** used in Kubernetes.
 - It is **simple, secure, and fast**.
@@ -117,7 +120,7 @@
 - Ensures redundancy and fault tolerance.
 ##### Add that `backups` are critical in ETCD, and the `etcdctl snapshot save` command is used for backups.
 
-# Kube API Server
+## Kube API Server
 - The **main component** of Kubernetes that **manages all requests**.
 - Responsible for:
   - **Authentication** (who can access)
@@ -142,7 +145,7 @@
     ```
   - Config is in: `/etc/kubernetes/manifests/kube-apiserver.yaml`
 
-# Kube Controller Manager
+## Kube Controller Manager
 - It **manages all controllers** in Kubernetes.
 - A **controller** is responsible for monitoring the cluster state and ensuring it reaches the desired condition.
 - Works through the **kube-apiserver** to track and control cluster components.
@@ -186,7 +189,7 @@
   - **Eviction timeout** (When to reassign pods).
 - `--controllers` option allows enabling/disabling specific controllers.
 
-# Kube-Scheduler
+## Kube-Scheduler
 - **Kube-Scheduler** is responsible for **deciding** which node a pod should be placed on.
 - **It does not create pods** on nodes—that's the job of the **kubelet**.
 ### Work of Kube-Scheduler
@@ -217,7 +220,7 @@
     ```
   - Config is in: `/etc/kubernetes/manifests/kube-scheduler.yaml`
 
-# Kubelet
+## Kubelet
 - **Kubelet** is the **primary agent** running on every worker node in a Kubernetes cluster.
 - It **registers the node** with the cluster and ensures that pods run correctly.
 - It is like the **captain of a ship**, handling all tasks related to containers on that node.
@@ -248,7 +251,7 @@
   # Check running kubelet process
   ```
 
-# Kube-Proxy
+## Kube-Proxy
 - `kube-proxy` is a **networking component** that runs on every node in a Kubernetes cluster.
 - It **forwards traffic** from services to the correct backend pods.
 - It ensures that **every pod can communicate with every other pod** inside the cluster.
@@ -280,7 +283,7 @@
     ```
   - Config is in: `/var/lib/kube-proxy/config.conf`
 
-# Kubernetes Pods
+## Kubernetes Pods
 - [Refer Here](https://kubernetes.io/docs/concepts/workloads/pods/) for the Official docs.
 - **Pod** is the **smallest deployable unit** in Kubernetes.
 - A **pod encapsulates one or more containers**.
@@ -360,7 +363,7 @@
   # Delete pod
   ```
 
-# Kubernetes Controllers
+## Kubernetes Controllers
 - Controllers are **the brain of Kubernetes**.
 - They **monitor Kubernetes objects** and take action when needed.
 - Example: Replication Controller, ReplicaSet, etc.
@@ -484,7 +487,7 @@
 - **Selectors**: Used by ReplicaSet to identify which pods to manage.
 - Helps ReplicaSet **monitor** the right pods among many.
 
-# Kubernetes Deployments
+## Kubernetes Deployments
 - [Refer Here](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) for the Official docs.
 - A **Deployment** in Kubernetes is a higher-level object used to **manage applications**.
 - It handles:
@@ -553,7 +556,7 @@
   - Deployment creates a **ReplicaSet**.
   - ReplicaSet creates **pods**.
 
-# Kubernetes Services
+## Kubernetes Services
 - [Refer Here](https://kubernetes.io/docs/concepts/services-networking/service/) for the Official docs.
 - Services allow communication **between Pods**, **between apps**, and **from external users** to Pods.
 - Services **abstract** the dynamic IPs of Pods (since Pods can be recreated and get new IPs).
@@ -669,7 +672,7 @@
   - **NodePort:** Access app from browser on Node IP
   - **LoadBalancer:** Expose service on a domain like `myapp.com` via AWS/GCP
 
-# Kubernetes Namespaces
+## Kubernetes Namespaces
 - [Refer Here](https://kubernetes.io/docs/concepts/overview/working-with-objects/namespaces/) for the Official docs.
 - A **namespace** in Kubernetes is like a **virtual cluster** inside your real cluster.
 - It is used to **divide cluster resources** among multiple users/projects/teams.
@@ -778,7 +781,7 @@
   # Delete a resourcequota
   ```
 
-# Kubernetes - Imperative vs Declarative Approaches
+## Kubernetes - Imperative vs Declarative Approaches
 - **Imperative:**
   - Direct commands to create/update/delete resources
   - **Examples:** `kubectl run`, `kubectl create`, `kubectl edit`, `kubectl delete`, `kubectl set image`
@@ -843,7 +846,7 @@
   # Create a service of type `NodePort` to expose pod port `80` on node port
   ```
 
-# kubectl apply
+## kubectl apply
 - **Creates the resource if it does not exist**, but **updates it if it already exists**.
 - It **works declaratively**, meaning Kubernetes will only update the parts that have changed in the YAML.
 - Recommended for managing resources efficiently in a production environment.
@@ -879,3 +882,903 @@
   - `last-applied-configuration` is **only stored** when you use `kubectl apply`.
   - **Other commands like `kubectl create` or `replace` do not save** this annotation.
   - Avoid mixing **imperative** (`kubectl create`, `kubectl delete`) and **declarative** (`kubectl apply`) approaches to manage the same object.
+
+
+# <p align="center">Scheduling</p>
+
+## Kubernetes Manual Scheduling
+- Normally, the **Kubernetes Scheduler** automatically decides **which node** a pod should run on.
+- **Manual Scheduling** means **you choose** which node a pod runs on **without using the scheduler**.
+### Manual Scheduling Works
+- Every pod has an internal field called **`nodeName`**.
+- The scheduler automatically fills this field when assigning a pod to a node.
+- In manual scheduling, **you** set this `nodeName` directly in the pod definition.
+#### Manually Assign a Pod to a Node
+- Based on `Pod Workloads APIs`, Write the Pod YAML file with `nodeName` field:
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: nginx
+    labels:
+      name: nginx
+  spec:
+    containers:
+    - name: nginx
+      image: nginx
+      ports:
+      - containerPort: 8080
+    nodeName: node02    # Manually specify node name
+  ```
+- This pod will be scheduled directly on `node02`.
+### No Scheduler Available
+- If the scheduler is **disabled or unavailable**, you can still **bind the pod manually** using a **Binding object**.
+#### Using Binding API
+- First create the pod **without nodeName** using `Pod Workloads APIs`:
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: nginx
+    labels:
+      name: nginx
+  spec:
+    containers:
+    - name: nginx
+      image: nginx
+      ports:
+      - containerPort: 8080
+  ```
+- Check the Pod status, it is in `Pending` state because there is no `Scheduler` present.
+  ![preview](./Images/Kubernetes_CKA12.png)
+- **Then create a `Binding` object:**
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `Binding`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#binding-v1-core) for the **Binding Cluster APIs**.
+    - `apiVersion` → Group/Version
+      1. If **Group** is `core`, provide only `Version`
+      2. If **Group** is other than `core`, provide `Group/Version`
+    - `kind` → Kind
+    - `metadata` & `target` → Use Field and Description.
+  - Based on `Binding Cluster APIs`, Write the Binding YAML file:
+    ```yaml
+    apiVersion: v1
+    kind: Binding
+    metadata:
+      name: nginx
+    target:
+      apiVersion: v1
+      kind: Node
+      name: node01
+    ```
+  - This binding will assign the pod named `nginx` to `node01`.
+  ![preview](./Images/Kubernetes_CKA14.png)
+  ![preview](./Images/Kubernetes_CKA13.png)
+### Important Points
+- Manual scheduling is not recommended for production but useful for learning and testing.
+- If you use `nodeName`, the **scheduler skips** the pod entirely.
+- Make sure the node exists and is **Ready**, otherwise the pod will stay in **Pending** state.
+- We **cann't move a running Pod from one Node to another Node**. We **need to delete Pod** from one Node and **recreate** it from another Node.
+  ```sh
+  kubectl replace --force -f <yaml-filename>
+  ```
+
+## Kubernetes Labels, Selectors & Annotations
+### Labels and Selectors
+- [Refer Here](https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/) for the Official docs.
+- **Labels:**
+  - **Labels** are **key-value pairs** attached to Kubernetes objects.
+  - Used to **group** and **identify** objects (pods, deployments, services, etc.)
+  - **Example:**
+    ```yaml
+    metadata:
+      labels:
+        app: my-app
+        env: prod
+    ```
+- **Selectors:**
+  - **Selectors** are used to **filter** and **select** objects based their labels.
+  - **Example:**
+    ```bash
+    kubectl get pods --selector <label-key>=<label-value>
+    kubectl get pods --selector <label-key>=<label-value>,<label-key>=<label-value>,<label-key>=<label-value>
+    ```
+#### Use Case Examples
+- **ReplicaSet:**
+  - Selects Pods using labels.
+  - In `metadata`, we have field `labels`, and in `spec`, we have field `selector`.
+    ```yaml
+    apiVersion: apps/v1
+    kind: ReplicaSet
+    metadata:
+      name: simple-webapp
+      labels:
+        app: my-app
+        function: Front-end
+    spec:
+      replicas: 3
+      selector:
+        matchLabels:
+          app: my-app
+      template:
+        metadata:
+          labels:
+            app: my-app # Important: this must match the selector
+            function: Front-end
+        spec:
+          containers:
+          - name: simple-webapp
+            image: simple-webapp
+    ```
+  - **Common Mistake**: Confusing ReplicaSet's own labels with Pod labels under `template`.
+- **Service:**
+  - Uses selectors to send traffic to the right Pods.
+  - In `spec`, we have field `selector`.
+    ```yaml
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: my-service
+    spec:
+      selector:
+        app: App1
+      ports:
+      - protocol: TCP
+        port: 80
+        targetPort: 9376
+    ```
+### Annotations
+- [Refer Here](https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/) for the Official docs.
+- Used to **store metadata/info**, that’s not used to select or group.
+- Example Uses: version info, contact info, build ID, etc.
+- **Labels and selectors** are used to `group` and `select` objects, while **Annotations** are used to `record other details for informational purposes`.
+- **Example:**
+  - In `metadata`, we have field `annotations`.
+    ```yaml
+    metadata:
+      annotations:
+        build-version: "v1.2.3"
+        contact: "admin@example.com"
+    ```
+
+## Taints and Tolerations
+- [Refer Here](https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/) for the Official docs.
+- **Taints and Tolerations** are used to **control which Pods can be scheduled on which Nodes**.
+- You **taint a node** to **repel pods**, and **pods can tolerate** taints using tolerations.
+- **Taints are applied to Nodes**, **Tolerations are applied to Pods YAML**.
+- Only pods that have a **matching toleration** can land on (be scheduled to) that node. Pods without toleration **cannot be scheduled** on tainted nodes.
+### Taint
+- Use `kubectl taint nodes` command to taint a node.
+- Syntax:
+  ```bash
+  kubectl taint nodes <node-name> <key>=<value>:<taint-effect>
+  ```
+  - There are three taint effects:
+    - **`NoSchedule:`** Pod **will not be scheduled** unless it has a matching toleration
+    - **`PreferNoSchedule:`** Try to avoid scheduling if not tolerated (soft restriction)
+    - **`NoExecute:`** Pod **will be evicted** from the node if it doesn’t tolerate this taint
+- **Example:**
+  ```bash
+  kubectl taint nodes node1 app=blue:NoSchedule
+  ```
+  - This means: node1 won’t accept any pod **unless** it has a **toleration** for `app=blue`.
+- **Commands:**
+  ```sh
+  kubectl describe node <node-name>
+  # To view taints on a node
+  kubectl taint nodes <node-name> <key>=<value>:<taint-effect>-
+  # To remove a taint (The '-' at the end removes the taint.)
+  ```
+### Pod Toleration
+- Tolerations are added to pods by adding a `tolerations` section in pod definition.
+- In `spec`, we have field `tolerations`.
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: myapp-pod
+  spec:
+    containers:
+    - name: nginx-container
+      image: nginx
+    tolerations:
+    - key: "app"
+      operator: "Equal"
+      value: "blue"
+      effect: "NoSchedule"
+  ```
+- This pod is now **allowed** to run on a node with the taint `app=blue:NoSchedule`.
+### Important Notes
+- Taints **don’t tell pod where to go**, they tell **node who is allowed**.
+- To force pod to go to specific node, use **Node Affinity**.
+- **Master Node Taint:**
+  - By default, **control-plane node is tainted**: **`node-role.kubernetes.io/control-plane:NoSchedule`**
+  - So, **no pods are scheduled on it** by default.
+
+## Node Selectors
+- [Refer Here](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector) for the Official docs.
+- `nodeSelector` is a **basic method to schedule a Pod on a specific node** based on node labels.
+- You **label a node**, then use `nodeSelector` in your pod spec to match that label.
+### Example Workflow
+- **Label a Node:**
+  - Syntax:
+    ```bash
+    kubectl label nodes <node-name> <key>=<value>
+    ```
+  - **Example:**
+    ```bash
+    kubectl label nodes node-1 size=Large
+    ```
+    - This adds the label `size=Large` to `node-1`.
+- **Pod with Node Selector:**
+  - Based on `Pod Workloads APIs`, Write the Pod YAML file with `nodeSelector` field.
+  - In `spec`, we have field `nodeSelector`.
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: myapp-pod
+    spec:
+      containers:
+      - name: data-processor
+        image: data-processor
+      nodeSelector:
+        size: Large
+    ```
+    - This pod will only be scheduled on nodes with label `size=Large`.
+- **Create the Pod:**
+  ```bash
+  kubectl apply -f pod-definition.yaml
+  ```
+### Limitations of Node Selector
+- `nodeSelector` only supports **exact match** with **a single label**.
+- Not suitable for complex scheduling needs (like OR, IN, NOT IN, etc.).
+
+## Node Affinity
+- [Refer Here](https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity) for the Official docs.
+- Node Affinity is an **advanced version of `nodeSelector`**.
+- It lets you schedule pods **on specific nodes based on labels**, using **expressions**.
+- More powerful and flexible than `nodeSelector`.
+### Pod with Node Affinity
+- Based on `Pod Workloads APIs`, Write the Pod YAML file with `nodeAffinity` field.
+- In `spec`, we have field `nodeAffinity`.
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: myapp-pod
+  spec:
+    containers:
+      - name: data-processor
+        image: data-processor
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: size
+                  operator: In
+                  values:
+                    - Large
+                    - Medium
+  ```
+- Pod can run **only** on nodes labeled with `size=Large` or `size=Medium`.
+### Match Expressions:
+- `key`: the label key (e.g. `size`)
+- `operator`: how to compare
+  - `In`: value is in list (e.g. `large`, `medium`)
+  - `NotIn`: value is **not** in list
+  - `Exists`: key must **exist**
+  - `DoesNotExist`: key must **not exist**
+### Types of Node Affinity:
+- **`requiredDuringSchedulingIgnoredDuringExecution`**:
+  - Required at pod creation, Ignored after pod runs (Pod **won’t be scheduled** if no matching node found)
+- **`preferredDuringSchedulingIgnoredDuringExecution`**:
+  - Try best to match, Ignored after pod runs (Pod is placed on best-matching node, but **can go anywhere** if needed)
+- **`requiredDuringSchedulingRequiredDuringExecution`**:
+  - This will **evict** the pod if node no longer meets affinity rules (not available yet, Future type)
+### Taints & Tolerations vs Node Affinity
+- **Taints & Tolerations:**
+  - **Prevent** pods from scheduling on nodes
+  - **Node controls** which pods are allowed
+  - Blocks pods **unless they tolerate taint**
+  - Avoid certain nodes (e.g., GPU-only)
+- **Node Affinity:**
+  - **Prefer or require** pods to go to specific nodes
+  - **Pod chooses** preferred node using labels
+  - Pod tries to find **matching node label**
+  - Target specific nodes (e.g., SSD-only)
+
+## Resource Requests and Limits
+- [Refer Here](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) for the Official docs.
+- Kubernetes lets you define **how much CPU and memory** (RAM) a container **requests** and the **maximum it can use**.
+  - **Request:** Minimum resources the container is guaranteed to get
+  - **Limit:** Maximum resources the container is allowed to use
+- **Default Behavior:**
+  - If you **don’t define** resource requests, Kubernetes assumes:
+    - `CPU = 0.5`
+    - `Memory = 256Mi`
+  - Pod might go into **Pending** state if no node has enough resources.
+### Pod with Resource Request
+- Based on `Pod Workloads APIs`, Write the Pod YAML file with `resources` field.
+- In `spec`, we have field `resources`.
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: simple-webapp
+  spec:
+    containers:
+    - name: app
+      image: simple-webapp
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "1"
+  ```
+- This pod **requires 1 CPU and 1Gi memory** to be scheduled.
+### Pod with Resource Limits
+- Based on `Pod Workloads APIs`, Write the Pod YAML file with `resources` field.
+- In `spec`, we have field `resources`.
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: simple-webapp
+  spec:
+    containers:
+    - name: app
+      image: simple-webapp
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "1"
+        limits:
+          memory: "2Gi"
+          cpu: "2"
+  ```
+- This pod **won’t be allowed to use more than 2 CPU or 2Gi memory**.
+### Exceeding Limits
+- If the container tries to use **more than its limits**:
+  - **CPU**: throttled (slowed down)
+  - **Memory**: container is **killed and restarted** (OOM error = Out Of Memory)
+### Scenarios
+- **No requests, no limits:** Pod can consume everything, bad for others
+- **No requests, but limits set:** Request = limit by default
+- **Requests + limits set:** Guaranteed request, capped by limit
+- **Requests set, limits not set:** Best option - guaranteed minimum, use extra if available
+### Notes
+- Requests and limits are defined **per container**, not per pod.
+- Use them to **protect nodes** from being overloaded.
+- Helps Kubernetes **schedule pods more efficiently**.
+
+## Editing Pods & Deployments
+### Editing Pods (Manually Created Pods)
+- You **cannot** change most parts of a running pod.
+  - **You can only edit:**
+    - `spec.containers[*].image`  
+    - `spec.initContainers[*].image`  
+    - `spec.activeDeadlineSeconds`  
+    - `spec.tolerations`  
+  - **Cannot edit:**
+    - Environment variables, service accounts, resource limits, etc.
+- There are two ways to **Edit** a Pod Properly:
+  1. **`kubectl edit`**
+  2. **`Export → Edit → Recreate`**
+#### Method:1 `kubectl edit` (Quick but Not Effective Directly)
+- Edit the Pod:
+  ```bash
+  kubectl edit pod <pod-name>
+  ```
+  - Opens pod YAML in an editor (usually `vi`).
+  - If you edit uneditable fields → **save will be denied**.
+  - But your changes are saved temporarily, e.g., `/tmp/kubectl-edit-xxxx.yaml`.
+- **To apply changes:**
+  ```bash
+  kubectl delete pod <pod-name>
+  # Delete pod
+  kubectl create -f /tmp/kubectl-edit-xxxx.yaml
+  # Create pod with temporarily saved file.
+  ```
+#### Method:2 `Export → Edit → Recreate` (Recommended)
+- Export the Pod YAML:
+  ```bash
+  kubectl get pod <pod-name> -o yaml > my-new-pod.yaml
+  ```
+- Edit and Make Changes: `vi my-new-pod.yaml`
+- Delete the Pod and Recreate with the above file:
+  ```sh
+  kubectl delete pod <pod-name>
+  kubectl create -f my-new-pod.yaml
+  ```
+### Editing Deployments
+- Deployments manage pods using a **template**.
+- You **can edit any field** in the pod template, and the deployment will automatically:
+  - Delete old pods
+  - Create new pods with updated values
+- Command:
+  ```bash
+  kubectl edit deployment <deployment-name>
+  ```
+- No need to delete/recreate anything manually.
+- Works well for changing environment variables, resource limits, image versions, etc.
+
+## Kubernetes DaemonSets
+- [Refer Here](https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/) for the Official docs.
+- A **DaemonSet** ensures **one pod is running on every node** (or selected nodes) in the cluster.
+- It runs a **copy of the pod on every node**.
+- If a **new node is added**, it creates a pod there automatically. If a **node is removed**, the pod is removed too.
+- Similar to ReplicaSet, but **runs exactly one copy per node**.
+- **Use Cases of DaemonSet:**
+  - Monitoring agents (e.g., Prometheus node exporter)
+  - Log collectors (e.g., Fluentd, Filebeat)
+  - Kubernetes system components (e.g., `kube-proxy`)
+  - Networking tools (e.g., CNI plugins like Calico or Weave Net)
+  ![preview](./Images/Kubernetes_CKA15.png)
+### DaemonSet YAML Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `DaemonSet`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#daemonset-v1-apps) for the **DaemonSet Workloads APIs**.
+  - `apiVersion` → Group/Version
+    - If **Group** is `core`, provide only `Version`
+    - If **Group** is other than `core`, provide `Group/Version`
+  - `kind` → Kind
+  - `metadata` & `spec` → Use Field and Description.
+- **`apiVersion`, `kind`, `metadata` & `spec`** these are must have Root Keys in every Kubernetes Manifest YAML files.
+- **DaemonSet YAML:**
+  - Based on `DaemonSet Workloads APIs`, Write the Deployment YAML file.
+  - Almost identical to a ReplicaSet, but with:
+    - `kind: DaemonSet`
+    - Uses `selector` and `template` for pod spec
+    ```yaml
+    apiVersion: apps/v1
+    kind: DaemonSet
+    metadata:
+      name: monitoring-daemon
+    spec:
+      selector:
+        matchLabels:
+          name: monitoring-agent
+      template:
+        metadata:
+          labels:
+            name: monitoring-agent
+        spec:
+          containers:
+          - name: monitoring-agent
+            image: some-monitoring-image
+    ```
+- **Commands:**
+  ```sh
+  kubectl create -f <filename>
+  # Create DaemonSet
+  kubectl get daemonset
+  # List DaemonSets
+  kubectl describe daemonset <name>
+  # Get details of a DaemonSet
+  ```
+### DaemonSet Schedules Pods
+- **Before Kubernetes v1.12**: Manually set `nodeName` in pod spec.
+- **From v1.12 onwards**: Uses the **default scheduler** and **node affinity rules**.
+
+## Kubernetes Static Pods
+- [Refer Here](https://kubernetes.io/docs/tasks/configure-pod-container/static-pod/) for the Official docs.
+- **Static Pods** are **created directly by the kubelet**, not by the kube-apiserver.
+- They are **not managed by the control plane** (no scheduler, no controllers, no etcd).
+- Kubelet watches a folder on the node for pod YAML files and manages pods from there.
+- You can **differentiate a static pod** from other pods by looking at **its name — it usually ends with the node name** where it’s running.
+  ![preview](./Images/Kubernetes_CKA16.png)
+### Working of Static Pods
+- Kubelet checks a folder (e.g. `/etc/kubernetes/manifests`) for pod definition files.
+- When a YAML file is placed there:
+  - Kubelet creates the pod.
+  - Kubelet **restarts** the pod if it crashes.
+  - **Updates** to the file will recreate the pod.
+  - **Deleting** the file will delete the pod.
+### Configuring Static Pod Path
+- You can specify the static pod path in **two ways**:
+  1. **In kubelet service file** (systemd):
+      - **Kubelet watches a directory** on the host machine for pod definition files.
+      - This directory is specified using the `--pod-manifest-path` option when starting the kubelet.
+        ```
+        --pod-manifest-path=/etc/kubernetes/manifests
+        ```
+  2. **In a kubelet config file** (used by kubeadm):
+      - Instead of passing the path directly in the systemd `kubelet.service` file, you can use a kubelet config file.
+        ```yaml
+        # kubelet-config.yaml
+        staticPodPath: /etc/kubernetes/manifests
+        ```
+      - And reference this file:
+        ```arduino
+        --config=/var/lib/kubelet/config.yaml
+        ```
+- Check the kubelet config with:
+  ```bash
+  ps -ef | grep kubelet
+  ```
+### View Static Pods
+- Static pods are containers run by Docker (or container runtime), not listed by `kubectl` unless there's an API server.
+- Use:
+  ```bash
+  docker ps
+  # For docker
+  crictl ps
+  # For containerd
+  ```
+- If part of a cluster, static pods will appear in `kubectl get pods`, **but**:
+  - They are shown as **mirror pods** (read-only, can't delete via kubectl).
+  - You must **edit or remove the file** in the manifest directory to manage them.
+### Limitations and Use Cases of Static Pods
+- **Limitations:**
+  - Only supports **Pods**.
+  - No support for Deployments, ReplicaSets, Services, etc.
+  - These features require the full Kubernetes control plane.
+- **Use Cases:**
+  - Useful for **bootstrapping the control plane** itself:
+    - Place YAML files for `kube-apiserver`, `etcd`, `controller-manager`, etc., into `/etc/kubernetes/manifests`
+    - Kubelet runs them as static pods.
+  - This is how **kubeadm** sets up the control plane.
+### Static Pods vs DaemonSets
+- **Static Pods:**
+  - Managed by **kubelet** only
+  - Ignored by scheduler
+  - Control plane not needed
+  - **Use case:** Bootstrap control plane, isolated pods
+- **DaemonSets:**
+  - Managed by **DaemonSet controller** via kube-apiserver
+  - Ignored by scheduler
+  - Control plane needed
+  - **Use case:** Deploying agents/loggers on all nodes
+
+## Multiple Schedulers in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/) for the Official docs.
+- **Scheduler:**
+  - The **scheduler** decides **which node** a pod runs on.
+  - The **default scheduler** (`kube-scheduler`) balances pods across nodes and respects:
+    - Taints & Tolerations
+    - Node Affinity/Anti-Affinity
+    - Resource Requests & Limits
+- **Multiple Schedulers:**
+  - You may need **custom logic** for placing pods (e.g., based on special checks).
+  - Kubernetes lets you **run multiple schedulers** in the same cluster.
+    - One for general workloads (default).
+    - Another (custom) for specific apps.
+### Working of Multiple Schedulers
+- **Default Scheduler**:
+   - Named: `default-scheduler` (implicit name if not specified)
+   - Configured via `kube-scheduler` config file
+- **Custom Scheduler**:
+   1. Create a **new config file** with a unique `schedulerName`
+   2. Deploying a Custom Scheduler (Pod or Deployment)
+      - Use the same `kube-scheduler` binary (or your own built one).
+      - Deploy with:
+        - `--config` pointing to your scheduler config
+        - `--kubeconfig` for API access
+      - Mount config via:
+        - **Volume** or
+        - **ConfigMap** (preferred)
+   3. Auth Requirements:
+      - Needs:
+        - `ServiceAccount`
+        - `ClusterRole` and `ClusterRoleBinding`
+      - **Note:** Covered in Authentication section of the course
+
+### Create a Custom Scheduler in Kubernetes
+- **Create a Custom Scheduler Config File:**
+  - This file gives your scheduler a unique name.
+  - [Refer Here](https://kubernetes.io/docs/reference/config-api/kube-scheduler-config.v1/#kubescheduler-config-k8s-io-v1-KubeSchedulerConfiguration) for the Official docs.
+    - Write YAML file based on `Fields`.
+  - Create a file called `my-scheduler-config.yaml`:
+    ```yaml
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: false  # Set false because we are running only one replica
+    schedulerName: my-custom-scheduler
+    ```
+- **Create a ConfigMap from this File:**
+  - This makes the config file available in the cluster to mount into a pod.
+    ```bash
+    kubectl create configmap my-scheduler-config \
+      --from-file=my-scheduler-config.yaml \
+      -n kube-system
+    ```
+- **Deploy the Custom Scheduler as a Deployment:**
+  - Create a file `my-scheduler-deployment.yaml` based on `Deployment Workloads APIs`:
+    ```yaml
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: my-custom-scheduler
+      namespace: kube-system
+    spec:
+      replicas: 1
+      selector:
+        matchLabels:
+          app: my-custom-scheduler
+      template:
+        metadata:
+          labels:
+            app: my-custom-scheduler
+        spec:
+          containers:
+          - name: my-custom-scheduler
+            image: k8s.gcr.io/kube-scheduler:v1.28.0  # Change version as needed
+            command:
+              - kube-scheduler
+              - --config=/etc/kubernetes/my-scheduler-config.yaml
+            volumeMounts:
+              - name: config
+                mountPath: /etc/kubernetes
+          volumes:
+            - name: config
+              configMap:
+                name: my-scheduler-config
+    ```
+  - Apply the deployment:
+    ```bash
+    kubectl apply -f my-scheduler-deployment.yaml
+    ```
+- **Check if It’s Running:**
+  ```bash
+  kubectl get pods -n kube-system | grep my-custom-scheduler
+  # You should see your scheduler pod running.
+  ```
+- **Test with a Pod That Uses Custom Scheduler:**
+  - Create a pod using your custom scheduler based on `Pod Workloads APIs`:
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: test-nginx
+    spec:
+      schedulerName: my-custom-scheduler  # <-- important!
+      containers:
+        - name: nginx
+          image: nginx
+    ```
+  - Save this as `nginx-custom.yaml` and apply:
+    ```bash
+    kubectl apply -f nginx-custom.yaml
+    ```
+- **Verify the Pod Was Scheduled by Your Scheduler:**
+  ```bash
+  kubectl get events -o wide
+  ```
+  - Check if the **source** of the "Scheduled" event is `my-custom-scheduler`.
+- **Troubleshooting:**
+  - Pod stays **Pending** ➜ Scheduler may not be working/configured.
+  - Check with:
+    ```bash
+    kubectl describe pod <pod-name>
+    kubectl get events -o wide
+    kubectl logs <scheduler-pod-name> -n kube-system
+    ```
+
+## Kubernetes Scheduler Configuration & Scheduler Profiles
+### Scheduling Process
+1. **Pod Created** → Added to Scheduling Queue.
+2. **Priority Sort Phase**: Pods sorted by `PriorityClass`.
+3. **Filter Phase**: Remove nodes that don't meet requirements.
+   - Plugins:
+     - `NodeResourcesFit` → Filters nodes without enough CPU/memory.
+     - `NodeName` → Filters nodes not matching `nodeName` in Pod spec.
+     - `NodeUnschedulable` → Filters cordoned (unschedulable) nodes.
+4. **Score Phase**: Score remaining nodes.
+   - Plugins:
+     - `NodeResourcesFit` → Scores based on leftover CPU/memory.
+     - `ImageLocality` → Prefers nodes with the pod’s image.
+5. **Bind Phase**: Pod is bound to the highest scored node using `DefaultBinder`.
+### Scheduler Plugins & Extension Points
+- Kubernetes scheduling uses **plugins** plugged into **extension points** at different phases.
+- Common extension points:
+  - `QueueSort`, `PreFilter`, `Filter`, `PostFilter`
+  - `PreScore`, `Score`, `Reserve`, `Permit`
+  - `PreBind`, `Bind`, `PostBind`
+- You can plug in **custom plugins** at any of these stages!
+### Custom Scheduler Options
+- **Option 1: Old Method**
+  - Run **multiple scheduler binaries** (`kube-scheduler`, `my-scheduler`, etc.).
+  - Issues: Hard to manage, potential race conditions (multiple schedulers might pick the same node).
+- **Option 2: New Method (K8s v1.18+)**
+  - Use **Scheduler Profiles** in a single scheduler config.
+  - Allows multiple virtual schedulers by `schedulerName` (Each profile = a virtual scheduler with a unique `schedulerName`).
+### Example Scheduler Profile Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/config-api/kube-scheduler-config.v1/#kubescheduler-config-k8s-io-v1-KubeSchedulerConfiguration) for the Official docs.
+    - Write YAML file based on `Fields`.
+- Create a file called `scheduler-config.yaml`:
+  ```yaml
+  apiVersion: kubescheduler.config.k8s.io/v1
+  kind: KubeSchedulerConfiguration
+  clientConnection:
+    kubeconfig: "/etc/kubernetes/scheduler.conf"
+  leaderElection:
+    leaderElect: true
+  profiles:
+  - schedulerName: default-scheduler
+    plugins:
+      score:
+        disabled:
+          - name: NodeResourcesBalancedAllocation
+        enabled:
+          - name: NodeResourcesLeastAllocated
+  ```
+  - In this config, we change the **scoring algorithm** by disabling one plugin and enabling another.
+### Using Custom Config with Kubeadm Clusters
+- Save your config as `scheduler-config.yaml`.
+- Scheduler runs as a static pod (`kube-system` namespace).
+- Modify `/etc/kubernetes/manifests/kube-scheduler.yaml`:
+  ```yaml
+  command:
+  - kube-scheduler
+  - --leader-elect=true
+  - --config=/etc/kubernetes/scheduler-config.yaml
+  ```
+- Saving the file, the Static Pod will auto-restarts the scheduler with the new config.
+### Scheduler High-Level Flow
+1. **Watch** the API server for unscheduled pods.
+2. **Filter** nodes that can run the pod.
+3. **Score** the filtered nodes.
+4. **Select** the best node.
+5. **Bind** the pod to that node.
+
+## Admission Controllers in Kubernetes
+- Components in the **API server pipeline** that **intercept requests** after:
+  1. **Authentication** – Validates who the user is (via certs).
+  2. **Authorization** – Checks if user **has permission** (via RBAC).
+- Admission controllers **validate, modify, or reject requests** before they are stored in etcd.
+### Use of Admission Controllers
+- RBAC handles **who can access what**, but **not how resources should be used**.
+- Admission controllers help **enforce cluster usage rules** like:
+  - Only allow images from internal registries.
+  - Reject `latest` image tags.
+  - Disallow containers running as root.
+  - Require specific labels in metadata.
+### Role in Request Flow
+1. **kubectl request** → User sends a request (e.g., create pod)
+2. API Server:
+   - **Authentication** → API server authenticates the request
+   - **Authorization** → API server authorizes using RBAC
+   - **Admission Controllers** → Admission Controllers validate/modify/reject request
+   - Object stored in **etcd** if all checks pass.
+### Examples of Built-in Admission Controllers
+- `NamespaceExists` → Rejects requests to **non-existent namespaces**.
+- `AlwaysPullImages` → Forces image to be pulled every time a pod is created.
+- `DefaultStorageClass` → Assigns default storage class if none specified.
+- `EventRateLimit` → Limits rate of requests to API server.
+- `NamespaceLifecycle` → Replaces `NamespaceExists` & `NamespaceAutoProvision`. Prevents use/deletion of system namespaces like `default`, `kube-system`.
+### Enabling / Disabling Admission Controllers
+- View current enabled plugins:
+  ```bash
+  kube-apiserver -h | grep enable-admission-plugins
+  ```
+- **In kubeadm-based setups**, the API server runs as a static pod:
+  - Modify:
+    ```bash
+    /etc/kubernetes/manifests/kube-apiserver.yaml
+    ```
+  - Add or modify:
+    ```yaml
+    --enable-admission-plugins=...,NamespaceAutoProvision,...
+    --disable-admission-plugins=...
+    ```
+  - Check the process to see enabled and disabled plugins:
+    ```sh
+    ps -ef | grep kube-apiserver | grep admission-plugins
+    ```
+### Example: Namespace Auto Creation
+1. Without `NamespaceAutoProvision`:
+   - Creating a pod in a non-existent namespace fails.
+2. With `NamespaceAutoProvision` enabled:
+   - Namespace is **auto-created**, and the pod is deployed.
+3. Note: This is now deprecated and replaced by `NamespaceLifecycle`.
+
+## Admission Controllers (Types & Webhooks)
+### Types of Admission Controllers
+- Kubernetes Admission Controllers are of **two main types**:
+  1. **Validating:**
+     - Only checks/validates the request and either **accepts or rejects** it.
+     - **Examples:** `NamespaceLifecycle`, `NamespaceExists`
+  2. **Mutating:**
+     - Can **modify (mutate)** the request before creation.
+     - **Examples:** `DefaultStorageClass`, `NamespaceAutoProvision`
+- Some can do **both** mutation and validation.
+### Work of Admission Controllers
+- **Order of Execution:**
+  1. Request → **Authentication**
+  2. **Authorization (RBAC)**
+  3. **Mutating Admission Controllers** (run **first**)
+  4. **Validating Admission Controllers** (run **after mutation**)
+  5. Object stored in **etcd**
+- Mutating comes first so that any changes made can be **validated** after.
+- **Example:**
+  - `NamespaceAutoProvision` (mutating) creates missing namespace.
+  - Then `NamespaceExists` (validating) confirms it exists.
+### `DefaultStorageClass` Example (Mutating Controller)
+- You create a **PVC without storageClass**.
+- `DefaultStorageClass` controller:
+  - Detects no storage class set.
+  - Automatically adds the default one.
+- **Result:** PVC gets created **with** default storage class.
+### Custom Admission Controllers using Webhooks
+- Want to apply **your own logic** to requests? Use **Admission Webhooks**.
+- They are Two Types:
+  1. **`MutatingAdmissionWebhook`** (Mutating)
+  2. **`ValidatingAdmissionWebhook`** (Validating)
+- These call an **external HTTP server** that you create.
+#### Work of Admission Webhooks
+1. API server sends **AdmissionReview** request (JSON) to your webhook server.
+2. Your server:
+   - **Reads** the user, operation, object, etc.
+   - **Responds** with allowed: `true` or `false`
+   - (Mutating webhooks can return a **patch** to modify the object)
+#### Setting Up Your Own Webhook (Steps)
+- **Step:1 `Develop Webhook Server`**
+  - Can be written in Go, Python, etc.
+  - Must accept `mutate` and/or `validate` HTTP requests.
+  - Responds with JSON.
+  - Example mutation:
+    - Add username as label to every object created.
+- **Step:2 `Deploy Webhook Server`**
+  - Option 1: Host **outside cluster** (provide a URL)
+  - Option 2: Host **inside cluster** as a **Deployment + Service**
+- **Step:3 `Configure Webhook in Kubernetes`**
+  - Create either:
+    - `MutatingWebhookConfiguration` **or**
+    - `ValidatingWebhookConfiguration`
+#### Example manifest snippet
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `MutatingWebhookConfiguration` or `ValidatingWebhookConfiguration`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#mutatingwebhookconfiguration-v1-admissionregistration-k8s-io) for the **MutatingWebhookConfiguration Metadata APIs** and [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#validatingwebhookconfiguration-v1-admissionregistration-k8s-io) for the **ValidatingWebhookConfiguration Metadata APIs**.
+  - `apiVersion` → Group/Version
+    - If **Group** is `core`, provide only `Version`
+    - If **Group** is other than `core`, provide `Group/Version`
+  - `kind` → Kind
+  - `metadata` & `webhooks` → Use Field and Description.
+- **Example manifest snippet:**
+  ```yaml
+  apiVersion: admissionregistration.k8s.io/v1
+  kind: ValidatingWebhookConfiguration
+  metadata:
+    name: pod-policy
+  webhooks:
+    - name: pod-policy.example.com
+      clientConfig:
+        service:
+          name: webhook-service
+          namespace: default
+          path: "/validate"
+        caBundle: <BASE64_CERT>
+      rules:
+        - operations: ["CREATE"]
+          apiGroups: [""]
+          apiVersions: ["v1"]
+          resources: ["pods"]
+  ```
+  - This webhook will be called **only when pods are created**.
+#### TLS Requirement
+- API server must communicate with webhook **over HTTPS**.
+- Your webhook server needs:
+  - TLS certificate (Have a **valid certificate and private key**)
+  - The certificate must be passed to Kubernetes as a `caBundle`
+- Creates a **TLS secret** for `certificate` and `private key`:
+  ```bash
+  kubectl -n <namespace-name> create secret tls <tls-secret-name> \
+      --cert "/root/keys/webhook-server-tls.crt" \
+      # Path to certificate
+      --key "/root/keys/webhook-server-tls.key"
+      # Path to key
+  ```
+  - This command creates a **TLS secret** in the required namespace, which contains the **certificate and private key** for your **webhook server**.
+- This secret provides those **valid certificate and private key** to use **TLS (HTTPS)**.
+- You mount this **TLS secret** into the **webhook server pod**, so the server can start with HTTPS enabled.
+  - The public certificate (`.crt`) is also **base64-encoded** and added to the `caBundle` in the webhook configuration like this:
+    ```yaml
+    clientConfig:
+      service:
+        name: webhook-service
+        namespace: webhook-demo
+        path: "/validate"
+      caBundle: <base64_encoded_crt_here>
+    ```
