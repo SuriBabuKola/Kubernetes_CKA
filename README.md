@@ -1782,3 +1782,921 @@
         path: "/validate"
       caBundle: <base64_encoded_crt_here>
     ```
+
+
+# <p align="center">Logging & Monitoring</p>
+
+## Monitoring in Kubernetes
+- Monitoring helps you **track CPU, memory, and resource usage** of:
+  - Nodes
+  - Pods
+  - Containers
+- Monitoring helps to:
+  - Track **resource usage**
+  - Detects **performance issues**
+  - Ensures **cluster health and capacity planning**
+- Kubernetes **does NOT** come with a full monitoring solution by default.
+- **Available Monitoring Tools:**
+  - **Metrics Server:**
+    - Built-in, basic
+    - In-memory only, no history
+  - **Prometheus:**
+    - Open-source
+    - Popular, stores historical data
+  - **Elastic Stack:**
+    - Open-source
+    - Powerful analytics
+  - **Datadog, Dynatrace:**
+    - Commercial
+    - Advanced features, dashboards
+  ![preview](./Images/Kubernetes_CKA17.png)
+### Metrics Server Monitoring Tool
+- Lightweight, one per cluster
+- Aggregates metrics from all nodes/pods
+- **Stores metrics in memory only** (no disk = no history)
+- Good for **basic monitoring & `kubectl top` commands**
+#### Metrics are Collected
+1. **Kubelet** runs on each node  
+2. **cAdvisor** inside Kubelet collects:
+   - CPU, memory, filesystem, network stats of containers
+3. **Metrics Server** pulls from Kubelet API
+4. This info is used by `kubectl top` command
+#### Install Metrics Server
+- **In Minikube:**
+  ```bash
+  minikube addons enable metrics-server
+  ```
+- **In Other Clusters:**
+  - [Refer Here](https://github.com/kubernetes-sigs/metrics-server?tab=readme-ov-file#installation) for the Installation site.
+    ```bash
+    kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+    ```
+#### Commands to View Metrics
+- **Node Metrics**:
+  ```bash
+  kubectl top node
+  ```
+- **Pod Metrics**:
+  ```bash
+  kubectl top pod
+  ```
+
+## Managing Application Logs in Kubernetes
+### Logs in Docker
+- Docker apps usually write logs to **stdout (standard output)**.
+- Run container in background (detached mode) using `-d`, logs are hidden.
+- View logs using:
+  ```bash
+  docker logs <container_id>
+  ```
+- Use `-f` to **stream live logs**:
+  ```bash
+  docker logs -f <container_id>
+  ```
+### Logs in Kubernetes
+- **Single Container Pod:**
+  - In Kubernetes, logs of containers inside pods can be accessed using:
+    ```bash
+    kubectl logs <pod-name>
+    ```
+  - To **stream live logs** from a pod:
+    ```bash
+    kubectl logs -f event-simulator-pod
+    ```
+    - `-f` means **follow** (like `tail -f`).
+- **Multiple Containers in a Pod:**
+  - If your pod has **more than one container**, you **must specify** the container name:
+    ```bash
+    kubectl logs <pod-name> -c <container-name>
+    ```
+  - To **stream live logs** from a pod:
+    ```bash
+    kubectl logs -f <pod-name> -c <container-name>
+    ```
+
+
+# <p align="center">Application Lifecycle Management</p>
+
+## Rolling Updates and Rollbacks in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/tutorials/kubernetes-basics/update/update-intro/) for the Official docs.
+### Deployment Rollouts & Revisions
+- When you **create a deployment**, it triggers a **rollout**.
+- Every rollout = **new revision** of the deployment.
+  - First creation = `revision 1`
+  - Update image/version = `revision 2`, and so on.
+- **Check rollout status:**
+  ```bash
+  kubectl rollout status deployment <name>
+  ```
+- **View rollout history:**
+  ```bash
+  kubectl rollout history deployment <name>
+  ```
+  ![preview](./Images/Kubernetes_CKA18.png)
+### Deployment Strategies
+- There are **2 types** of deployment strategies:
+  1. **Recreate Strategy:**
+      - Deletes all old pods first, then creates new pods.
+      - **App goes down temporarily.**
+  2. **Rolling Update Strategy (Default):**
+      - Replaces pods **one by one**.
+      - **No downtime.**
+  ![preview](./Images/Kubernetes_CKA19.png)
+### Updating a Deployment
+- **Method:1 `Modify YAML file`**
+  - Change image/version/replicas/etc. in the file.
+    ```bash
+    kubectl apply -f deployment.yaml
+    ```
+  - Triggers a new rollout & revision.
+- **Method:2 `Use 'kubectl set image'`**
+  - Use below set Image command:
+    ```bash
+    kubectl set image deployment <name> <container-name>=<new-image>
+    ```
+  - Quicker, but be careful: **YAML file will not reflect this change** unless updated manually.
+  ![preview](./Images/Kubernetes_CKA20.png)
+### View Deployment Details
+- Use Describe Command:
+  ```bash
+  kubectl describe deployment <name>
+  ```
+  - Shows:
+    - Strategy used
+    - Events (e.g., old ReplicaSet scaled down, new scaled up)
+### Rollouts Work Internally
+- New deployment creates a **new ReplicaSet**.
+- New pods are launched from the new ReplicaSet.
+- Old ReplicaSet is scaled down (based on strategy).
+- Use:
+  ```bash
+  kubectl get replicasets
+  ```
+  - Shows:
+    - Old RS with `0` pods
+    - New RS with updated pods
+### Rolling Back a Deployment
+- If something breaks in the new version:
+  ```bash
+  kubectl rollout undo deployment <name>
+  ```
+  - Switches back to the previous ReplicaSet.
+  - After rollback:
+    - Old RS = Active pods
+    - Faulty RS = 0 pods
+
+## Commands & Arguments
+- [Refer Here](https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/) for the Official docs.
+### Docker: `CMD` vs `ENTRYPOINT`
+- **Key Concepts:**
+  - Containers are designed to **run a specific process**, not a full OS.
+  - A container **stays alive** as long as the **main process inside it** runs.
+- **Dockerfile Instructions:**
+  - `CMD`: Defines the default arguments passed to the container.
+  - `ENTRYPOINT`: Defines the actual executable (main program) to run.
+- **Behavior:**
+  - If **only CMD** is used: CLI args **replace** CMD.
+  - If **ENTRYPOINT + CMD**: CLI args **override CMD**, but are **appended to ENTRYPOINT**.
+#### Examples
+- **Ubuntu Image (Default behavior):**
+  - **Dockerfile:**
+    ```Dockerfile
+    FROM ubuntu
+    CMD ["bash"]
+    ```
+  - **Run the Docker Container:**
+    ```bash
+    docker run <image-name>
+    # Exits immediately (bash has no terminal)
+    ```
+- **Override CMD:**
+  - **Dockerfile:**
+    ```Dockerfile
+    FROM ubuntu
+    CMD ["sleep", "5"]
+    ```
+  - **Run the Docker Container:**
+    ```bash
+    docker run <image-name> sleep 10
+    # Overrides CMD to "sleep 10"
+    ```
+- **Custom Image with ENTRYPOINT and CMD:**
+  - **Dockerfile:**
+    ```Dockerfile
+    FROM ubuntu
+    ENTRYPOINT ["sleep"]
+    CMD ["5"]
+    ```
+    - `docker run <image-name>` → runs `sleep 5`
+    - `docker run <image-name> 10` → runs `sleep 10`
+  - **Override ENTRYPOINT:**
+    ```bash
+    docker run --entrypoint sleep2.0 <image-name> 10
+    # runs: sleep2.0 10
+    ```
+### Kubernetes: `Command` vs `Args` in Pod
+- **Mapping to Docker:**
+  - `ENTRYPOINT` in **Dockerfile**  → `command` in **Kubernetes Pod YAML**
+  - `CMD` in **Dockerfile** → `args` in **Kubernetes Pod YAML**
+- **Sample Pod Definition:**
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#pod-v1-core) for the **Pod Workloads APIs**.
+  - In `spec` → `containers`, the Fields `args` & `command` are available.
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: ubuntu-sleeper
+    spec:
+      containers:
+        - name: sleeper
+          image: ubuntu-sleeper
+          command: ["sleep"]   # overrides ENTRYPOINT
+          args: ["10"]         # overrides CMD
+    ```
+- **Key Points:**
+  - `command` → overrides ENTRYPOINT (executable)
+  - `args` → overrides CMD (arguments to executable)
+  - If only `args` is provided → only CMD is overridden
+  - If both `command` and `args` are provided → both ENTRYPOINT and CMD are overridden
+- **Using `kubectl run`:**
+  1. Change `ONLY ENTRYPOINT` (leave CMD as-is):
+      ```bash
+      kubectl run <pod-name> --image=<image-name> --command -- <command>
+      ```
+      - **Effect:**
+        - `command` → overrides ENTRYPOINT
+        - `args` → keeps CMD from image
+  2. Change `ONLY CMD` (leave ENTRYPOINT as-is):
+      ```bash
+      kubectl run <pod-name> --image=<image-name> -- <arg>
+      ```
+      - **Effect:**
+        - `command`: not set → ENTRYPOINT from image is used
+        - `args` → overrides CMD
+  3. Change `BOTH ENTRYPOINT and CMD`
+      ```bash
+      kubectl run <pod-name> --image=<image-name> --command -- <command> <arg>
+      ```
+      - **Effect:**
+        - `command` → overrides ENTRYPOINT
+        - `args` → overrides CMD
+
+## Setting Environment Variables in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/) for the Official docs.
+- **Using `env` in Pod Definition:** To set environment variables directly in a Pod, use the `env` field under the container spec.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#pod-v1-core) for the **Pod Workloads APIs**.
+  - In `spec` → `containers`, the Field `env` is available.
+    ```yaml
+    spec:
+      containers:
+      - name: my-container
+        image: my-image
+        env:
+        - name: VAR_NAME
+          value: "some-value"
+    ```
+  - `env` is an array.
+  - Each item has:
+    - `name`: The environment variable name.
+    - `value`: The value assigned.
+- This method sets environment variables **directly** inside the pod.
+### Alternate Ways to Set ENV in Kubernetes
+- You can also set environment variables using:
+  - **ConfigMaps:** Store non-sensitive configuration like `APP_COLOR`, `APP_MODE`, etc.
+    ```yaml
+    env:
+    - name: VAR_NAME
+      valueFrom:
+        configMapKeyRef:
+          name: my-configmap  # Name of the configmap
+          key: config-key     # Key name in the configmap
+    ```
+  - **Secrets:** Store sensitive data like passwords, tokens, etc.
+    ```yaml
+    env:
+    - name: VAR_NAME
+      valueFrom:
+        secretKeyRef:
+          name: my-secret
+          key: secret-key
+    ```
+- These can be used to inject values into environment variables in Pods for better security and reusability.
+  ![preview](./Images/Kubernetes_CKA21.png)
+
+## Kubernetes ConfigMaps
+- [Refer Here](https://kubernetes.io/docs/concepts/configuration/configmap/) for the Official docs.
+- To **store and manage configuration data** (key-value pairs) **outside** the Pod spec.
+- Useful when you have many pods and want to **centralize config management**.
+- Avoids hardcoding environment variables in pod YAML files.
+### Steps to Use ConfigMaps
+#### Create the ConfigMap
+- There are two ways to create ConfigMap:
+  1. **Imperative way (CLI-based):**
+      - Using **`--from-literal`**:
+        ```bash
+        kubectl create configmap <configmap-name> --from-literal=<key>=<value> --from-literal=<key>=<value>
+        ```
+      - Using **`--from-file`**:
+        ```bash
+        kubectl create configmap <configmap-name> --from-file=<path-to-config.txt>
+        ```
+        - The file contents will be added as data under the filename key.
+  2. **Declarative way (YAML):**
+      - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+        - Select required API, in this case `ConfigMap`.
+      - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#configmap-v1-core) for the **ConfigMap Config and Storage APIs**.
+        - Based on **ConfigMap Workloads APIs** write the YAML file:
+          ```yaml
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: app-config
+          data:
+            APP_COLOR: blue
+            APP_MODE: dev
+          ```
+      - **Commands:**
+        ```sh
+        kubectl apply -f configmap.yaml
+        # Create configmap
+        kubectl get configmaps
+        # List configmaps
+        kubectl describe configmap <configmap-name>
+        # Describe the configmap
+        ```
+#### Inject ConfigMap into a Pod
+- **As Environment Variables:**
+  ```yaml
+  spec:
+    containers:
+    - name: myapp
+      image: myapp-image
+      envFrom:
+      - configMapRef:
+          name: app-config
+  ```
+  - All key-value pairs from `app-config` will become environment variables inside the container.
+- **As Environment Variable Value:**
+    ```yaml
+    env:
+    - name: VAR_NAME
+      valueFrom:
+        configMapKeyRef:
+          name: my-configmap  # Name of the configmap
+          key: config-key     # Key name in the configmap
+    ```
+  - Inject specific key as single environment variable
+  ![preview](./Images/Kubernetes_CKA22.png)
+
+## Kubernetes Secrets
+- [Refer Here](https://kubernetes.io/docs/concepts/configuration/secret/) for the Official docs.
+- Secrets store **sensitive information** like passwords, API keys, tokens.
+- Similar to ConfigMaps but **data is stored in base64 encoded format**.
+- Used to **avoid hardcoding sensitive info** directly in code or pod files.
+- ConfigMaps store **data in plain text** → NOT safe for sensitive info.
+- Use Secrets to store passwords and keys instead.
+### Steps to Use Secrets
+#### Create the Secrets
+- There are two ways to create ConfigMap:
+  1. **Imperative Method (Command Line):**
+      - Using **`--from-literal`**:
+        ```bash
+        kubectl create secret generic <secret-name> --from-literal=<key>=<value> --from-literal=<key>=<value>
+        ```
+      - Using **`--from-file`**:
+        ```bash
+        kubectl create secret generic <secret-name> --from-file=<path-to-secret.txt>
+        ```
+        - The file contents will be added as data under the filename key.
+  2. **Declarative Method (YAML File):**
+      - **First Encode the Values:**
+        - Use `base64` to encode plain text (values):
+          ```bash
+          echo -n "<value-name>" | base64
+          ```
+      - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+        - Select required API, in this case `Secret`.
+      - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#secret-v1-core) for the **Secret Config and Storage APIs**.
+        - Based on **Secret Config and Storage APIs** write the YAML file:
+          ```yaml
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: app-secret
+          data:
+            DB_PASSWORD: <encoded-value-data>  # base64 encoded value
+          ```
+      - **Commands:**
+        ```sh
+        kubectl apply -f secret.yaml
+        # Create secret
+        kubectl get secrets
+        # List secrets
+        kubectl describe secret <secret-name>
+        # Describe the secret (does not show secret value)
+        kubectl get secret <secret-name> -o yaml
+        # shows encoded data
+        ```
+      - **To `Decode` the encoded Data:**
+        ```bash
+        echo "<encoded-data>" | base64 --decode
+        ```
+#### Injecting Secrets into Pods
+1. **As Environment Variables:**
+    ```yaml
+    spec:
+    containers:
+    - name: myapp
+      image: myapp-image
+      envFrom:
+      - secretRef:
+          name: app-secret
+    ```
+     - All key-value pairs from `app-secret` will become environment variables inside the container.
+2. **As Individual Env Var:**
+    ```yaml
+    env:
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: app-secret  # Name of the secret
+          key: DB_PASSWORD  # Key name in the secret
+    ```
+     - Inject specific key as single environment variable
+3. **As a Volume (Mount Secrets as Files):**
+    ```yaml
+    spec:
+      containers:
+      - name: my-custom-scheduler
+        image: <image-name>
+        volumeMounts:
+        - name: secret-vol
+          mountPath: "/etc/secret"
+      volumes:
+      - name: secret-vol
+        secret:
+          secretName: app-secret
+    ```
+     - Each key becomes a file inside `/etc/secret/`, and file content is the value.
+  ![preview](./Images/Kubernetes_CKA23.png)
+### Important Notes
+- **Secrets are only base64-encoded, NOT encrypted** by default.
+- Anyone with access to encoded secret can decode it easily.
+- Secrets are stored **in etcd unencrypted** unless you enable encryption.
+- **Best Practices:**
+  - Don't commit secrets.yaml to Git.
+  - Enable **encryption at rest** for etcd secrets.
+  - Use **RBAC** to control who can access or use secrets.
+  - Use **external secret managers** like:
+    - AWS Secrets Manager
+    - HashiCorp Vault
+    - Azure Key Vault
+    - Google Secret Manager
+- **Kubernetes protection mechanisms:**
+  - Secrets are only sent to nodes that need them.
+  - Stored in memory (`tmpfs`) by kubelet, not written to disk.
+  - Automatically deleted when the Pod is deleted.
+
+## Encrypting Secret Data at Rest in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/) for the Official docs.
+- Kubernetes stores Secrets in `etcd`. By default, they are only **Base64 encoded** — **not encrypted**. Anyone with access to `etcd` can view secrets in plaintext.
+- Encrypt secrets stored in `etcd` using an **EncryptionConfiguration** file and configure the `kube-apiserver` to use it.
+- **Steps:**
+  1. Create EncryptionConfiguration YAML
+  2. Edit kube-apiserver manifest to add config
+  3. Restart happens automatically
+  4. New secrets get encrypted
+  5. Update old secrets to encrypt them
+### Step-by-Step Process:
+#### 1. Create a `Secret`
+- Create a Sample Secret for testing purpose:
+  ```bash
+  kubectl create secret generic my-secret --from-literal=key1=supersecret
+  # Create secret
+  kubectl get secret my-secret -o yaml
+  # Fetches the kubernetes secret object and displays it in yaml format
+  ```
+  ![preview](./Images/Kubernetes_CKA24.png)
+- **Note:** The value is **Base64 encoded**, not encrypted. It can be easily decoded using a `Base64 decoder`.
+  ![preview](./Images/Kubernetes_CKA25.png)
+#### 2. Check if the `Secret is Encrypted in etcd`
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#verifying-that-data-is-encrypted) for the Official docs.
+- **Check if `etcdctl` is installed:** If not, install it.
+  ```bash
+  apt-get install etcd-client
+  ```
+- **Use `etcdctl` to fetch the secret data:**
+  ```bash
+  ETCDCTL_API=3 etcdctl \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/server.crt \
+    --key=/etc/kubernetes/pki/etcd/server.key \
+    get /registry/secrets/default/<secret-name> | hexdump -C
+  ```
+  - **Note:** Verify etcd certificates exist before using `etcdctl` with `ls -l /etc/kubernetes/pki/etcd/` command.
+- **Interpret the result:**
+  - If the secret value appears in plaintext → **Not encrypted**
+  - If it looks like gibberish → **Encrypted**
+  ![preview](./Images/Kubernetes_CKA26.png)
+#### 3. Check if `Encryption at Rest is Enabled`
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#determining-whether-encryption-at-rest-is-already-enabled) for the Official docs.
+- **Verify if `kube-apiserver` uses encryption config:**
+  ```bash
+  ps aux | grep kube-apiserver | grep encryption-provider-config
+  ```
+  - If the flag is missing → **encryption is not enabled**
+  - You can also confirm by checking `/etc/kubernetes/manifests/kube-apiserver.yaml`
+#### 4. Create `Encryption Configuration` File
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#encrypting-your-data) for the Official docs.
+- **Generate the encryption key:**
+  - Generate `32-byte base64` key:
+    ```bash
+    head -c 32 /dev/urandom | base64
+    # For linux
+    ```
+- **Write an Encryption Configuration file:**
+  ```yaml
+  apiVersion: apiserver.config.k8s.io/v1
+  kind: EncryptionConfiguration
+  resources:
+    - resources:
+        - secrets
+      providers:
+        - aescbc:
+            keys:
+              - name: key1
+                secret: <32-byte-base64-key>
+        - identity: {}
+  ```
+  - **Important**:
+    - **First provider** in the list is used for encryption.
+    - `identity` = No encryption. Keep it at the bottom.
+    - `aescbc`, `secretbox`, `aesgcm` = encryption options.
+#### 5. Update `kube-apiserver` to Use the `New Encryption Configuration File`
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#use-the-new-encryption-configuration-file) for the Official docs.
+- Save the new encryption config file to `/etc/kubernetes/enc/enc.yaml` on the control-plane node.
+- Edit the manifest for the `kube-apiserver` static pod file `/etc/kubernetes/manifests/kube-apiserver.yaml`
+  - Add this flag:
+    ```yaml
+    --encryption-provider-config=/etc/kubernetes/enc/enc.yaml
+    ```
+  - Mount the file using `volume` & `volumeMount`:
+    ```yaml
+    # Inside volumes:
+    - name: enc-config
+      hostPath:
+        path: /etc/kubernetes/enc
+        type: DirectoryOrCreate
+    # Inside volumeMounts:
+    - mountPath: /etc/kubernetes/enc
+      name: enc-config
+      readOnly: true
+    ```
+- `Kube-apiserver` will **auto-restart** (since it's a static pod).
+- **Verify if `kube-apiserver` uses encryption config:**
+  ```bash
+  ps aux | grep kube-apiserver | grep encryption-provider-config
+  ```
+#### 6. Test Encryption is Working
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#verifying-that-data-is-encrypted) for the Official docs.
+- **Create a new Secret:**
+  ```bash
+  kubectl create secret generic my-secret-2 --from-literal=key2=topsecret
+  ```
+- **Check `etcd` directly:**
+  ```bash
+  ETCDCTL_API=3 etcdctl get \
+    --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+    --cert=/etc/kubernetes/pki/etcd/server.crt \
+    --key=/etc/kubernetes/pki/etcd/server.key \
+    /registry/secrets/default/my-secret-2 | hexdump -C
+  ```
+- If value is **not human-readable**, it's **encrypted**.
+  ![preview](./Images/Kubernetes_CKA27.png)
+#### 7. Ensure Old Secrets are Encrypted
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/encrypt-data/#ensure-all-secrets-are-encrypted) for the Official docs.
+- **Old secrets are not encrypted automatically**.
+- You must **update** them to trigger re-encryption:
+  ```bash
+  kubectl get secrets --all-namespaces -o json | kubectl replace -f -
+  ```
+
+## Multi-Container Pods
+### Why Multi-Container Pods
+- Microservices architecture breaks down large apps into **independent, small components**.
+- Sometimes, **two services need to work closely together**, like:
+  - A **web server** + a **log agent**.
+- You don't want to merge their code, but you want them to:
+  - Be **deployed and scaled together**.
+  - **Communicate easily**.
+  - **Share resources**.
+### Multi-Container Pods
+- A **single pod** that contains **multiple containers**.
+- All containers in the pod:
+  - Share the **same lifecycle** (created & destroyed together).
+  - Share the **same network** (can talk via `localhost`).
+  - Share **volumes/storage** (no need for extra setup).
+#### Common Multi-Container Pod Patterns
+1. **Sidecar Pattern**
+   - Adds extra functionality to the main container.  
+   - Example: A logging agent running next to a web server to collect logs.  
+2. **Adapter Pattern**
+   - Transforms data between the main application and external systems.  
+   - Example: Format logs or metrics before sending them to a monitoring system.
+3. **Ambassador Pattern**
+   - Acts as a proxy to manage communication between the application and external services.  
+   - Example: Connect to a database with authentication and routing.
+### Multi-Container Configuration
+- In the Pod YAML, under `spec.containers`, add multiple container blocks.
+- `containers` is an **array** (list) — that's why you can define multiple containers.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#pod-v1-core) for the **Pod Workloads APIs**.
+  - Based on `Pod Workloads APIs`, write the YAML File:
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: multi-container-pod
+    spec:
+      containers:
+        - name: web-server
+          image: nginx
+          ports:
+            - containerPort: 80
+        - name: log-agent
+          image: log-agent
+    ```
+  - Useful when two components need tight integration but still want to be built and deployed independently.
+  ![preview](./Images/Kubernetes_CKA28.png)
+
+## Init Containers in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/concepts/workloads/pods/init-containers/) for the Official docs.
+- A **special container** in a pod that runs **before** the main app containers start.
+- It **runs to completion** and **exits**, unlike app containers that stay alive.
+- Used for **setup tasks** that must finish **before the main app starts**.
+- **Use Cases:**
+  - Pulling code or binaries **before** app runs.
+  - Waiting for a **database or service** to become available.
+  - Performing **initial setup or checks**.
+- **Key Features:**
+  - **Run Order:** Init containers run **one-by-one**, in **sequential order**.
+  - **Blocking:** App containers **don’t start** until all init containers **complete successfully**.
+  - **Retries:** If any init container **fails**, the **pod restarts** until it succeeds.
+  - **Shared Context:** Can share volumes and networking with main containers.
+### InitContainers Configuration
+- In the Pod YAML, under `spec`, we have Field `initContainers`.
+- `initContainers` is an **array** (list) — that's why you can define multiple initContainers.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#pod-v1-core) for the **Pod Workloads APIs**.
+  - Based on `Pod Workloads APIs`, write the YAML File:
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: myapp-pod
+    spec:
+      containers:
+      - name: myapp-container
+        image: busybox:1.28
+        command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+      initContainers:
+      - name: init-myservice
+        image: busybox:1.28
+        command: ['sh', '-c', 'until nslookup myservice; do echo waiting for myservice; sleep 2; done;']
+      - name: init-mydb
+        image: busybox:1.28
+        command: ['sh', '-c', 'until nslookup mydb; do echo waiting for mydb; sleep 2; done;']
+    ```
+
+## Kubernetes Autoscaling
+- Scaling = Adjusting resources or instances to handle more or less load.
+- There are **two types**:
+  1. **Horizontal Scaling:** Add **more instances** (e.g., more Pods or Nodes).
+  2. **Vertical Scaling:** Add **more resources** (CPU/RAM) to existing instance (Pod or Node).
+- **In Kubernetes, Scaling Happens at 2 Levels:**
+  - **In Cluster:**
+    1. **Horizontal Scaling:** Add more **nodes** to the cluster
+    2. **Vertical Scaling:** Increase resources (CPU/RAM) of nodes
+  - **In Workload:** [Refer Here](https://kubernetes.io/docs/concepts/workloads/autoscaling/) for the Official docs.
+    1. **Horizontal Scaling:** Add more **pods** (replicas of app)
+    2. **Vertical Scaling:** Increase CPU/memory limits of existing pods
+- **Manual Scaling:**
+  - **Cluster (Horizontal):** Add new Node (Use `kubeadm join`)
+  - **Workload (Horizontal):** `kubectl scale`
+  - **Workload (Vertical):** `kubectl edit` and update resource requests/limits
+  - **Note:** Vertical scaling of cluster nodes isn't common, as it often requires downtime.
+- **Automated Scaling:**
+  - Horizontal scaling of **cluster** → **Cluster Autoscaler**
+  - Horizontal scaling of **workloads** → **Horizontal Pod Autoscaler (HPA)**
+  - Vertical scaling of **workloads** → **Vertical Pod Autoscaler (VPA)**
+### Horizontal Pod Autoscaler (HPA)
+- [Refer Here](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/) for the Official docs.
+- HPA **automatically adjusts the number of Pods** in a Deployment, StatefulSet, or ReplicaSet **based on CPU/memory usage or custom metrics**.
+- Manual scaling (`kubectl scale`) needs constant monitoring (e.g., with `kubectl top pod`).
+- It’s **slow** to respond to sudden traffic spikes.
+- HPA helps automate this based on usage thresholds.
+- **HPA Requirements:**
+  - Metrics Server must be running on the cluster.
+  - Target Pod must have resource **requests/limits** (e.g., CPU).
+  - Kubernetes version 1.23+ includes HPA natively.
+- **Working of HPA:**
+  - Reads resource limits (e.g., CPU: 500 millicores).
+  - Continuously polls the Metrics Server.
+  - Compares current usage with a **target threshold** (e.g., 50%).
+  - Scales Pods up/down between **minReplicas** and **maxReplicas**.
+#### Metric Sources
+- **Internal (default):** Uses Metrics Server (CPU/memory)
+- **Custom Metrics:** Needs Custom Metrics Adapter
+- **External Metrics:** Tools like Datadog, Dynatrace (via external adapter)
+#### Creating Horizontal Pod Autoscaler (HPA)
+- There are two ways to create HPA:
+  1. **Imperative Method (Command Line):**
+      ```bash
+      kubectl autoscale deployment <deployment-name> \
+        --cpu-percent=50 --min=1 --max=10
+      ```
+       - Monitors CPU usage
+       - Creates/Removes Pods automatically
+  2. **Declarative Method (YAML File):**
+      - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+        - Select required API, in this case `HorizontalPodAutoscaler`.
+      - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#secret-v1-core) for the **HorizontalPodAutoscaler Metadata APIs**.
+        - Based on **HorizontalPodAutoscaler Metadata APIs** write the YAML file:
+          ```yaml
+          apiVersion: autoscaling/v2
+          kind: HorizontalPodAutoscaler
+          metadata:
+            name: my-app-hpa
+          spec:
+            scaleTargetRef:
+              apiVersion: apps/v1
+              kind: Deployment
+              name: my-app
+            minReplicas: 1
+            maxReplicas: 10
+            metrics:
+              - type: Resource
+                resource:
+                  name: cpu
+                  target:
+                    type: Utilization
+                    averageUtilization: 50
+          ```
+      - **Commands:**
+        ```sh
+        kubectl create -f <filename>
+        # Create HPA
+        kubectl get hpa
+        # Check HPA Status. Shows: CPU usage, Threshold, Current replica count and Min/Max limits.
+        kubectl delete hpa <hpa-name>
+        # Delete HPA
+        ```
+### In-Place Resizing of Pods (Manual Vertical Scaling)
+- Normally, if you **change resource limits/requests** (CPU/Memory) of a pod:
+  - The **pod gets deleted** and a new pod is created with updated values.
+  - This is **disruptive** (especially for stateful apps).
+- **In-Place Resize Feature:**
+  - Introduced as an **alpha feature** in **Kubernetes 1.27**.
+  - As of version **1.32**, it is **still not enabled by default**.
+  - Allows **updating CPU/Memory** of a pod **without deleting it**.
+#### To Enable
+- Set feature gate in Kubernetes components: **kube-apiserver**, **kube-scheduler**, and **kubelet** **(if needed)**.
+  1. **Using kubeadm (for `kube-apiserver`):** If you installed your cluster using `kubeadm`, follow these steps
+      - **Edit the kube-apiserver manifest:**
+        ```bash
+        sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+        ```
+      - **Add the feature gate in `command` section:**
+        ```yaml
+        - --feature-gates=InPlacePodVerticalScaling=true
+        ```
+        > If there are already feature gates set, just append it like:
+          ```yaml
+          - --feature-gates=SomeFeature=true,InPlacePodVerticalScaling=true
+          ```
+      - **Save and Exit:** Since it's a static pod, it will **automatically restart** the `kube-apiserver`.
+  2. **Enable for `kubelet`:**
+      - **Edit the kubelet config (usually in `/var/lib/kubelet/config.yaml`):**
+        ```yaml
+        featureGates:
+          InPlacePodVerticalScaling: true
+        ```
+      - **Restart kubelet:**
+        ```bash
+        sudo systemctl restart kubelet
+        ```
+  3. **Enable for `kube-scheduler` or `kube-controller-manager`** (if needed)
+      - **Edit their respective Manifest files:**
+        ```bash
+        sudo vi /etc/kubernetes/manifests/kube-scheduler.yaml
+        sudo vi /etc/kubernetes/manifests/kube-controller-manager.yaml
+        ```
+      - **Add feature gate to the `command` section:**
+        ```yaml
+        - --feature-gates=InPlacePodVerticalScaling=true
+        ```
+- **Check if the Feature is Enabled:**
+  - You can verify it by checking the logs of `kube-apiserver`:
+    ```bash
+    kubectl -n kube-system logs <kube-apiserver-pod-name> | grep InPlacePodVerticalScaling
+    ```
+  - Or check the running arguments:
+    ```bash
+    ps aux | grep kube-apiserver
+    ```
+#### Resize Policy
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#pod-v1-core) for the **Pod Workloads APIs**. Based on that, write the YAML file.
+  - In Pod `spec → containers`, the Field `resizePolicy` is available.
+  - You can define resize rules per container.
+    ```yaml
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "1Gi"
+    resizePolicy:
+      - resourceName: "cpu"
+        restartPolicy: "NotRequired"
+      - resourceName: "memory"
+        restartPolicy: "RestartContainer"
+    ```
+  - Means:
+    - CPU change won't restart the pod.
+    - Memory change will restart the container (but not the whole pod).
+#### Limitations
+- Only works for **CPU and memory**.
+- Does **not** work for:
+  - QoS Class changes
+  - Init containers / Ephemeral containers
+  - Windows pods
+- Memory limit **cannot be decreased below current usage**.
+- If memory resize is not feasible (e.g., usage too high), status will stay `InProgress`.
+### Vertical Pod Autoscaler (VPA)
+- [Refer Here](https://kubernetes.io/docs/tasks/configure-pod-container/resize-container-resources/) for the Official docs.
+- VPA **automatically adjusts** the **CPU and memory** (requests/limits) of pods **based on actual usage**.
+- It helps **scale pods vertically**, unlike HPA which scales **horizontally** (adds/removes pods).
+#### Manual Vertical Scaling (Before VPA)
+- Admin manually runs:
+  ```bash
+  kubectl edit deployment my-app
+  ```
+- Updates CPU/memory resources.
+- This **kills existing pods** and **creates new ones** with updated values.
+#### VPA Components
+- To use VPA:
+  1. **Not built-in**, must be installed from GitHub: [Refer Here](https://github.com/kubernetes/autoscaler/blob/master/vertical-pod-autoscaler/docs/installation.md)
+  2. After deployment, VPA runs 3 components:
+     - **Recommender**: Analyzes metrics and recommends optimal resource values.
+     - **Updater**: Evicts under/over-provisioned pods so they can restart with better resources.
+     - **Admission Controller**: Modifies new pods at creation time with recommended values.
+#### Working of VPA
+- **Recommender** suggests values.
+- **Updater** may **evict pods** if they need resource changes.
+- **Admission Controller** changes pod spec at **creation** based on recommendation.
+#### Creating Vertical Pod Autoscaler (VPA)
+- Based on below example write the VPA YAML file:
+  ```yaml
+  apiVersion: autoscaling.k8s.io/v1
+  kind: VerticalPodAutoscaler
+  metadata:
+    name: my-app-vpa
+  spec:
+    targetRef:
+      apiVersion: "apps/v1"
+      kind: Deployment
+      name: my-app
+    updatePolicy:
+      updateMode: "Auto"
+    resourcePolicy:
+      containerPolicies:
+        - containerName: "*"
+          minAllowed:
+            cpu: "250m"
+            memory: "256Mi"
+          maxAllowed:
+            cpu: "1"
+            memory: "1Gi"
+  ```
+- **VPA Modes:**
+  - **`Off`:** Only recommends, no changes made (only Recommender works).
+  - **`Initial`:** Applies recommendations only to **new pods at creation**.
+  - **`Recreate`:** **Evicts** current pods to apply recommended resources.
+  - **`Auto`:** Like `Recreate` (future-ready for in-place updates when stable).
+  > Use `kubectl describe vpa <name>` to check recommendations.
+### VPA vs HPA
+- **VPA:**
+  - Vertical Scaling (adjusts CPU/memory)
+  - Pod restart needed (Has Downtime)
+  - Doesn't handles sudden traffic (slow to react)
+  - Reduces overprovisioning
+  - **Use Case:**
+    - Use for **CPU/Memory-heavy** apps that need optimized resource tuning.  
+    - Ex: Databases, AI/ML, JVM apps.
+- **HPA:**
+  - Horizontal Scaling (adds/removes pods)
+  - No downtime
+  - Handles sudden traffic (fast scaling)
+  - Avoids idle pods
+  - **Use Case:**
+    - Use for **fast-scaling**, **stateless** services.
+    - Ex: Web apps, APIs, microservices.
