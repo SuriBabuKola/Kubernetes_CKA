@@ -2700,3 +2700,297 @@
   - **Use Case:**
     - Use for **fast-scaling**, **stateless** services.
     - Ex: Web apps, APIs, microservices.
+
+
+# <p align="center">Cluster Maintenance</p>
+
+## OS Upgrades in Kubernetes
+- During OS upgrades or maintenance, **nodes may go down**.
+- If a node stays down for **5+ minutes**, Kubernetes **terminates its pods** and **reschedules them** on other nodes.
+  - If the **pod is part of a ReplicaSet**, new replicas are created on other nodes.
+  - If it's a **standalone pod**, it is **lost** unless manually handled.
+- To avoid disruption, we **manually drain** the node **before doing maintenance**.
+### Node Maintenance Options
+- **`kubectl drain` – Safe Way to Evict Pods**
+  ```bash
+  kubectl drain <node-name>
+  ```
+  - Evicts all **pods safely** from the node.
+  - Marks the node as **unschedulable** (cordons it).
+  - Used **before OS upgrade or reboot**.
+  ```bash
+  kubectl drain <node-name> --ignore-daemonsets
+  ```
+  - **Evicts all pods** (except DaemonSets and mirror/static pods) from the node.
+  - `--ignore-daemonsets:`
+    - **Skips evicting DaemonSet pods**, which normally cannot be moved.
+    - Required if the node has DaemonSets (like logging or monitoring agents).
+- **`kubectl cordon` – Prevent New Pods Only**
+  ```bash
+  kubectl cordon <node-name>
+  ```
+  - **Marks node as unschedulable** (no new pods scheduled).
+  - Does **not evict** current pods.
+  - Useful if you want to **pause scheduling** but keep existing pods running.
+- **`kubectl uncordon` – Bring Node Back**
+  ```bash
+  kubectl uncordon <node-name>
+  ```
+  - **Makes node schedulable** again after maintenance.
+  - New pods can now be scheduled on it.
+### Node Lifecycle (During OS Upgrade)
+- **Drain** the node → Pods move to other nodes
+- **Upgrade/Reboot** the node
+- **Uncordon** the node → Node ready for scheduling again
+
+## Kubernetes Releases & Versioning
+- **Kubernetes Versions Format:** `Major.Minor.Patch`
+  ![preview](./Images/Kubernetes_CKA29.png)
+  - **Major: `1`** → Big architectural changes (rare).
+  - **Minor: `31`** → New features, released every few months.
+  - **Patch: `0`** → Bug fixes, released more frequently.
+- **Types of Releases**:
+  - **Alpha**: Experimental, features disabled by default, may be buggy.
+  - **Beta**: More stable, features enabled by default.
+  - **Stable**: Fully tested, production-ready.
+- **Kubernetes Releases:**
+  - [Refer Here](https://github.com/kubernetes/kubernetes/releases) for the Official releases GitHub page.
+  - Downloaded package has all the Kubernetes Components in it, except `ETCD Cluster` and `CoreDNS` as they are seperate projects.
+### Cluster Upgrade Process
+- Kubernetes supports only the **latest 3 minor versions** at any time. (e.g., If latest is `1.32`, supported = `1.32`, `1.31`& `1.30`).
+- **Don't skip versions when upgrading!** Upgrade one minor version at a time (e.g., v1.30 → v1.31 → v1.32).
+- All components don't need to be the same version, but must follow the **version skew policy**.
+- **Version Skew Policy:**
+  - In a Kubernetes cluster, **different components can run different versions**, but there are **rules** about **how far apart** those versions can be. These rules are called the **version skew policy**.
+  - **Key Rules of Version Skew Policy:**
+    - **kubelet** → Can be **1 minor version older** than the API server
+    - **kube-proxy** → Should match the kubelet version on that node
+    - **kubectl** → Can be **1 minor version older or newer** than the API server
+    - **Control plane components (scheduler, controller-manager, etc.)** → Should match API server version
+#### Worker Node Upgrade Strategies
+- **Strategy-A** **`Upgrade All Nodes at Once`**
+  - Fast, but requires downtime.
+- **Strategy-B** **`Upgrade One Node at a Time`** (Recommended)
+  - Steps:
+    1. Drain the node.
+    2. Upgrade `kubeadm`, `kubelet` and `kubectl` on node.
+    3. Uncordon the node.  
+- **Strategy-C** **`Add New Nodes (Cloud-friendly)`**
+  - Add new nodes with newer version.
+  - Move workloads.
+  - Delete old nodes.
+### Upgrading Kubernetes Cluster with kubeadm (v1.31 ➝ v1.32)
+- Upgrade a Kubernetes cluster from **v1.31 to v1.32** using `kubeadm`.
+- Steps involve upgrading **kubeadm**, then upgrading the **control plane**, followed by the **kubelet**, and finally the **worker nodes**.
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/) for the Official docs.
+#### Step-by-Step Upgrade Process
+1. **Update the Package Repository:**
+    - In Official docs, go to **`Changing the package repository`** and click **`new package repositories hosted at pkgs.k8s.io`**
+    - [Refer Here](https://kubernetes.io/blog/2023/08/15/pkgs-k8s-io-introduction/) for the **`new package repositories hosted at pkgs.k8s.io`** Official site.
+      - In that navigate to **`How to migrate to the Kubernetes community-owned repositories?`** and follow steps based on OS.
+      - In that steps change the Version to required  Version (In this case `1.32`) and Execute commands.
+    - Update the Package Repository on **all nodes (controlnode + workernodes)**.
+2. **Check Available `kubeadm` Versions:**
+    - In Official docs, go to **`Determine which version to upgrade to`** and run **`madison kubeadm`** command to check the available `kubeadm versions`.
+  ![preview](./Images/Kubernetes_CKA30.png)
+    - Pick the latest version in the **v1.32.x** series (e.g., `1.32.3-1.1`).
+3. **Upgrade `kubeadm` on Control Plane Node:**
+    - In Official docs, go to **`Upgrading control plane nodes`** and follow the **`kubeadm upgrade`** steps.
+    - In **`Upgrade kubeadm`** command, replace **`x`** in **`1.32.x-*`** with the latest patch version (in our case `1.32.3-1.1`).
+    - Verify the download Version.
+    - Verify the upgrade Plan.
+      - Confirms what versions you can upgrade to.
+      - Tells which components will be upgraded automatically.
+      - Reminds that **kubelet** must be upgraded **manually**.
+    - Choose a version to upgrade to, and run the appropriate command.
+      - **`kubeadm upgrade plan`** command gives the upgrade command, run that command to upgrade **`kubeadm`**
+        ```bash
+        sudo kubeadm upgrade apply v1.32.3
+        ```
+  ![preview](./Images/Kubernetes_CKA31.png)
+
+4. **Drain the Node:**
+    ```bash
+    kubectl drain <node-name> --ignore-daemonsets
+    ```
+5. **Manually Upgrade `kubelet` & `kubectl`:**
+    - In Official docs, go to **`Upgrade kubelet and kubectl`** and follow the steps.
+    - In **`Upgrade the kubelet and kubectl`** command, replace **`x`** in **`1.32.x-*`** with the latest patch version (in our case `1.32.3-1.1`).
+    - Restart the **`kubelet`**.
+6. **Uncordon the Node:**
+    ```bash
+    kubectl uncordon <node-name>
+    ```
+  ![preview](./Images/Kubernetes_CKA32.png)
+> Upgrading Kubernetes Cluster Controlplane Node is completed.
+#### Upgrade Worker Nodes
+- In Official docs, go to **`Upgrade worker nodes`** and Choose required one based on Node OS.
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/upgrading-linux-nodes/) for the Official docs of **`Upgrading Linux nodes`**.
+- Repeat the following steps on **each Worker Node**:
+  1. **`Update the Package Repository`**
+  2. **`Upgrade kubeadm`**
+  3. **`Call "kubeadm upgrade"`**
+      ```bash
+      sudo kubeadm upgrade node
+      ```
+  4. **`Drain the Node`**
+  5. **`Upgrade kubelet & kubectl`**
+  6. **`Uncordon the Node`**
+  ![preview](./Images/Kubernetes_CKA33.png)
+> Upgrading Kubernetes Cluster is completed (Controlplane & Worker Nodes).
+
+## Kubernetes Backup and Restore
+### Backup in Kubernetes
+- Kubernetes data can be categorized into:
+  1. **Resource Configuration Files** (YAMLs)
+     - Store your **Deployment, Pod, Service** YAMLs in a folder.
+     - Save them in a **version control system** (like GitHub).
+     - Helps easily **recreate the app** even if the cluster is lost.
+     - Use `kubectl apply -f` to redeploy.
+
+  2. **Cluster State Data** (etcd Cluster)
+     - Contains **all cluster state data**: nodes, namespaces, secrets, config maps, etc.
+     - Backing up etcd ensures **entire cluster state** is saved.
+  ![preview](./Images/Kubernetes_CKA34.png)
+### Declarative vs Imperative Objects
+- **Declarative**:
+  - Save YAMLs ➝ good for backup.
+- **Imperative**:
+  - Created with commands ➝ not automatically saved.
+  - Use `kubectl get` to export current state into YAML for backup.
+### Backup Methods
+#### 1. Backup Resource Configs (Backup with `kubectl`)
+- You can back up the YAML definitions of resources using:
+  1. **Imperative Backup:**
+      ```bash
+      kubectl get all --all-namespaces -o yaml > all-resources-backup.yaml
+      ```
+      - **Note:** Only backs up a few resource types (e.g., Pods, Services, Deployments).
+      - Also backup other resource types: secrets, configmaps, CRDs, etc.
+  2. **Declarative Backup (Preferred):**
+      - Save YAML files of resources in version control (GitHub, GitLab, etc.)
+      - Helps with easy re-creation of resources.
+#### 2. Backup ETCD (Full Cluster State)
+- **etcd stores:**
+  - Cluster info, state, config, node details.
+- **etcd is on master node:**
+  - Data stored in a **data directory** (e.g., `/var/lib/etcd`).
+- **Backing up etcd (Snapshot Save):**
+  1. **Set API Version:**
+      ```bash
+      export ETCDCTL_API=3
+      ```
+  2. **Take ETCD Snapshot:**
+      ```bash
+      etcdctl snapshot save snapshot.db \
+        --endpoints=https://127.0.0.1:2379 \
+        --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+        --cert=/etc/kubernetes/pki/etcd/server.crt \
+        --key=/etc/kubernetes/pki/etcd/server.key
+      ```
+      - This creates a `snapshot.db` file (can specify full path).
+
+  3. **Check Snapshot Status:**
+      ```bash
+      etcdctl snapshot status snapshot.db
+      ```
+### Restore Methods
+#### 1. Restore from ETCD Snapshot (ETCD as a Pod)
+1. **Stop Kube API Server:**
+    ```bash
+    systemctl stop kube-apiserver
+    ```
+2. **Restore Snapshot:**
+    ```bash
+    etcdctl snapshot restore snapshot.db \
+      --data-dir=/var/lib/etcd-from-backup
+    ```
+3. **Update etcd configuration files** to use new data dir.
+    - Go to `/etc/kubernetes/manifests/etcd.yaml`
+    - In `volumes`, change the `etcd-data` path to `/var/lib/etcd-from-backup`
+    - With this change, `/var/lib/etcd` on the container points to `/var/lib/etcd-from-backup` on the `controlplane` (which is what we want).
+4. **Restart Services:**
+    ```bash
+    systemctl daemon-reload
+    systemctl restart etcd
+    systemctl start kube-apiserver
+    ```
+#### 2. Restore from ETCD Snapshot (ETCD as a Service)
+1. **SSH to the ETCD Server and Run Restore:**
+    ```bash
+    ETCDCTL_API=3
+    etcdctl snapshot restore snapshot.db \
+      --data-dir=/var/lib/etcd-data-new
+    ```
+2. **Update Permissions:**
+    ```bash
+    chown etcd:etcd /var/lib/etcd-data-new
+    ```
+4. **Update ETCD Service Config:**
+   - Edit `/etc/systemd/system/etcd.service`
+   - Update `--data-dir=/var/lib/etcd-data-new`
+5. **Reload and Restart ETCD:**
+    ```bash
+    systemctl daemon-reload
+    systemctl restart etcd
+    systemctl status etcd
+    ```
+### `etcdctl` Command Tips
+- Always use these flags with etcdctl for TLS-authenticated clusters:
+  - `--cacert`
+  - `--cert`
+  - `--key`
+  - `--endpoints=https://127.0.0.1:2379`
+- Use `-h` with commands for help:
+  ```bash
+  etcdctl snapshot save -h
+  etcdctl snapshot restore -h
+  ```
+### Tools for Backup: `Velero`
+- Tool to backup and restore Kubernetes resources.
+- Works with the Kubernetes API.
+- Can also backup volumes (PV/PVC).
+### Important Points
+- Managed Kubernetes (like EKS, AKS, GKE): often **no access to etcd**, so backup via **Kube API** is preferred.
+- Combine both backup methods for safety.
+- Practice both **kubectl-based backup** and **etcd snapshot & restore**.
+- **Cluster Exploration Commands:**
+  ```bash
+  kubectl config view
+  # View all configured clusters
+  kubectl config use-context <cluster-name>
+  # Switch between clusters
+  kubectl get nodes
+  # List nodes in the current cluster
+  ```
+#### ETCD Configuration Types
+1. **Stacked ETCD (local):** ETCD runs **as a pod** on the **control plane node**.
+   - Check using:
+     ```bash
+     kubectl get pods -n kube-system
+     ```
+   - If ETCD pod exists → **Stacked ETCD**.
+
+2. **External ETCD (remote):** ETCD runs on a **separate server**.
+   - No ETCD pod seen in kube-system namespace.
+   - Check API server config:
+     ```bash
+     kubectl describe pod <apiserver-pod> -n kube-system
+     ```
+   - If ETCD URL points to another IP → **External ETCD**.
+#### Verify ETCD Cluster Members (External ETCD)
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/configure-upgrade-etcd/) for the Official docs.
+- Use `etcdctl member list` command:
+  ```bash
+  ETCDCTL_API=3
+  etcdctl \
+    --endpoints=<url> \
+    --cacert=<path> \
+    --cert=<path> \
+    --key=<path> \
+    member list
+  ```
+- Get `--endpoints`, `--cert`, `--key`, and `--cacert` from the ETCD process:
+  ```bash
+  ps -ef | grep -i etcd
+  ```
