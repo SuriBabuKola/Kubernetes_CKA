@@ -2994,3 +2994,1483 @@
   ```bash
   ps -ef | grep -i etcd
   ```
+
+
+# <p align="center">Security</p>
+
+## Kubernetes Security Primitives
+- Kubernetes is widely used in production — **security is critical**.
+- Need to **secure the cluster**, both at:
+  1. **Host level**
+  2. **Kubernetes component level**
+- Keep the **underlying OS** (hosts/nodes) secure. Regularly apply **security patches** and limit access to nodes.
+### 1. Host-Level Security
+- Secure the machines (VMs or physical) that run Kubernetes:
+  - Disable root access
+  - Disable password login
+  - Use only **SSH key-based login**
+  - Apply additional infrastructure-level hardening
+- If the **host is compromised**, the entire cluster is at risk.
+### 2. Kubernetes-Level Security
+#### API Server
+- The Central Point:
+  - Everything in Kubernetes goes through the **API Server**.
+  - So, it must be **well protected**.
+- In Kubernetes, security decisions are made on **two levels**:
+  1. **Who can access?** → *Authentication*
+  2. **What can they do?** → *Authorization*
+#### 1. **Authentication:**
+- Who can access the API Server is defined by the Authentication mechanisms.
+- Methods:
+  - Static password/token files
+  - **Certificates**
+  - External providers (e.g., **LDAP**)
+  - **ServiceAccounts** (for machines/apps)
+- Controls **access to the cluster**
+#### 2. **Authorization:**
+- Once they gain access to the cluster, what they can do is defined by authorization mechanisms.
+- Methods:
+  - **RBAC (Role-Based Access Control)** ← most commonly used
+  - ABAC (Attribute-Based Access Control)
+  - Node Authorizer
+  - Webhook Authorizers
+- Controls **permissions within the cluster**
+### TLS Certificates (Encryption in Transit)
+- All internal communication between `etcd`, `kube-apiserver`, `controller-manager`, `scheduler`, `kubelet` and `kube-proxy` cluster components is encrypted using **TLS certificates**.
+- TLS ensures **secure component-to-component** communication.
+### Network Policies
+- Used to **control communication between pods** in the cluster.
+- Acts like a **firewall** inside Kubernetes.
+- By default, **all Pods can talk to each other**. You can restrict this using **Network Policies**.
+- You can **allow or deny** traffic between apps/pods based on:
+  - Labels
+  - Namespaces
+  - Ports
+- Network policies control:
+  - **Ingress (incoming)**
+  - **Egress (outgoing)**
+
+## Kubernetes Authentication
+- [Refer Here](https://kubernetes.io/docs/reference/access-authn-authz/authentication/) for the Official docs.
+- Used to verify **who** is trying to access the cluster.
+- There are **2 main types of users** that access the Kubernetes API Server:
+  - **Humans** (Admins, Developers) → access via `kubectl` or API
+  - **Robots** (Services, Applications) → **managed by Kubernetes**
+- **Note:** End users of the deployed applications (like website visitors) are not managed by Kubernetes—they are handled by the app itself.
+### API Server Handles All Authentication
+- All access (via `kubectl` or direct API) goes through the **API Server**
+- API server must **authenticate** each request
+### Authentication Mechanisms
+- Kubernetes supports **multiple methods** to authenticate users:
+  - **Static Password File** → Usernames & passwords stored in a CSV file
+  - **Static Token File** → Long-lived bearer tokens stored in a  CSV file
+  - **Certificates** → TLS certificates (X.509) to identify users
+  - **Service Accounts** → Used for pods/services inside the cluster
+  - **OIDC** → External auth via providers like Google, GitHub
+  - **Webhook Token Auth** → External system validates bearer token
+  > Static files (passwords/tokens) are **not recommended for production** – good only for learning/demo.
+### Configure Authentication in `kube-apiserver`
+#### Using Static Password File (CSV)
+- **Format:** `password,username,userID[,group]`
+- Add to API server using flag:  
+  ```bash
+  --basic-auth-file=/etc/kubernetes/auth/user-details.csv
+  ```
+- Update `kube-apiserver` Pod spec if using `kubeadm`
+- **Example** (with `curl`): 
+  - You can test user access with a `curl` command:
+    ```bash
+    curl -v -k https://<MASTER-IP>:6443/api/v1/pods -u "user1:password123"
+    ```
+#### Using Static Token File (CSV)
+- **Format:** `token,username,userID[,group]`
+- Add to API server using flag:  
+  ```bash
+  --token-auth-file=/etc/kubernetes/auth/token.csv
+  ```
+- Update `kube-apiserver` Pod spec if using `kubeadm`
+- **Example** (with `curl`): 
+  - You can test user access with a `curl` command:
+    ```bash
+    curl -v -k https://<MASTER-IP>:6443/api/v1/pods -H "Authorization: Bearer <your-token-here>"
+    ```
+#### Need to Mount Static Password/Token File as a Volume
+- **Need to mount the volume** if you're using **Kubeadm** and placing the auth file on the **host machine**.
+- **Because:**
+  - The `kube-apiserver` runs as a **static pod**.
+  - Static pods are containerized, so they **don’t see host paths** unless you mount them explicitly.
+- **Create file on host** (e.g., `/etc/kubernetes/auth/user-details.csv`)
+- **Mount it inside the `kube-apiserver` container:**
+    ```yaml
+    volumeMounts:
+    - mountPath: /etc/kubernetes/auth
+      name: auth-volume
+      readOnly: true
+    
+    volumes:
+    - name: auth-volume
+      hostPath:
+        path: /etc/kubernetes/auth
+        type: DirectoryOrCreate
+    ```
+### Warnings & Notes
+- These static file methods store **plain-text passwords/tokens** – not secure!
+- Use only for **learning or testing** environments. **NOT recommended for production**.
+- For secure production environments, use **certificates, OIDC, or service accounts**.
+- In `kubeadm`, also update volume mounts in the static Pod manifest (`/etc/kubernetes/manifests/kube-apiserver.yaml`)
+- **Authentication ≠ Authorization** → You also need to set **RBAC roles**.
+
+## SSL/TLS Certificates (Basics)
+### Certificate
+- A **TLS/SSL certificate** helps build **trust** between two parties (like browser ↔ server).
+- It also ensures **encryption**, so no one can read the data in the middle (like a hacker sniffing network traffic).
+- Commonly used in **HTTPS (TLS)** and **SSH**.
+- Contains:
+  - Server/domain info
+  - **Public key**
+  - Issuer info (who signed it)
+### Use of Encryption
+- **Without Encryption:**
+  - Data like **usernames and passwords** are sent as **plain text**.
+  - Hackers can easily **steal** them.
+- **With encryption:**
+  - Data is **encoded** and unreadable by hackers.
+#### Types of Encryption
+1. **Symmetric Encryption:**
+    - Uses **one single key** to encrypt and decrypt.
+    - Key is shared between sender and receiver.
+    - **Risk**: If hacker gets the key (which is sent over the network), they can read the data.
+2. **Asymmetric Encryption:** 
+    - Uses **two keys**:  
+      - **Public Key (Lock)** – can be shared with anyone.  
+      - **Private Key (Key)** – must be kept secret.
+    - Data encrypted with public key can only be decrypted with **matching private key**.
+    - Solves the problem of secure key exchange.
+### SSH Key Example (for understanding key pairs)
+- You generate SSH keys:
+  - `id_rsa` → Private Key
+  - `id_rsa.pub` → Public Key
+- Add public key to the server (`~/.ssh/authorized_keys`)
+- Only someone with the private key (you) can access the server.
+### Working of HTTPS and TLS
+1. Web server generates its **own public-private key pair**.
+2. User accesses website via HTTPS.
+3. Server sends its **public key** inside a **certificate**.
+4. Browser:
+   - Validates the certificate.
+   - Generates a **symmetric key** for faster encryption.
+   - Encrypts it using the server’s public key.
+5. Server decrypts the symmetric key using its **private key**.
+6. From now on, both use the symmetric key for fast encrypted communication.
+### Man-in-the-Middle (MITM) Attack Problem
+- A **hacker** can pretend to be the website by:
+  - Hosting a **fake** website.
+  - Creating **self-signed certificates**.
+  - Making the user believe the site is legit.
+#### Solution: Certificate Authorities (CAs)
+- A **Certificate Authority (CA)** is a **trusted company** that:
+  - Verifies who you are.
+  - Signs your certificate using **its private key**.
+- Browser trusts certificates signed by **known CAs** (like DigiCert, GlobalSign, etc).
+### TLS Certificate
+- Public key
+- Domain name (must match URL typed)
+- Other valid domain aliases
+- Issuer (who signed the certificate)
+### CSR – Certificate Signing Request
+1. Server generates a **CSR** (includes public key & domain).
+2. Sends it to a CA.
+3. CA validates it and signs the certificate.
+4. Server receives a **signed certificate**.
+### How Browser Validates a Certificate
+- Browser has list of **trusted CA public keys**.
+- When a site sends a certificate:
+  - Browser checks who signed it.
+  - Uses CA’s **public key** to validate the signature.
+### Internal (Private) CAs
+- For internal apps (like payroll, intranet):
+  - Organizations can **host their own CA**.
+  - Install internal CA public keys on employee browsers.
+
+### Public Key Infrastructure (PKI)
+- PKI is the **system** that manages:
+  - Certificates
+  - Key generation
+  - Signing
+  - Verification
+- PKI = CA + public/private key + certificate handling
+### Common Certificate File Types
+- `cert.pem` or `cert.crt` → Public certificate
+- `cert.key` → Private key
+- `ca.crt` → Certificate Authority’s public cert
+- `csr.pem` → Certificate Signing Request
+
+## TLS Certificates in Kubernetes
+- Kubernetes uses **TLS certificates** for **encryption** and **authentication**.
+- Ensures secure communication between:
+  - Users ⇄ API server
+  - Kubelet ⇄ API server
+  - API server ⇄ etcd
+### Certificate Authority (CA)
+- Acts as the **trusted third party**.
+- Used to **sign** and **verify** other certificates.
+- Kubernetes components use **CA-signed certificates** to trust each other.
+- Kubernetes sets up a **default CA** at:
+  ```
+  /etc/kubernetes/pki/ca.crt
+  /etc/kubernetes/pki/ca.key
+  ```
+### TLS Certificate Creation in Kubernetes
+- There are different tools available such as **easyrsa**, **openssl** or **cfssl** etc. or many others for generating certificates.
+#### Step:1 Create a `Certificate Authority (CA)`
+- Acts as the root of trust for signing other certificates
+  ```bash
+  openssl genrsa -out ca.key 2048
+  # Generate Keys
+  openssl req -new -key ca.key -subj "/CN=KUBERNETES-CA" -out ca.csr
+  # Generate CSR
+  openssl x509 -req -in ca.csr -signkey ca.key -out ca.crt
+  # Sign Certificate
+  ```
+- Output:
+  - `ca.key` (Private Key)
+  - `ca.crt` (CA certificate)
+#### Step:2 Create `Client Certificate` (e.g., for admin user)
+- Commands:
+  ```bash
+  openssl genrsa -out admin.key 2048
+  # Generate Keys
+  openssl req -new -key admin.key -subj "/CN=kube-admin/O=system:masters" -out admin.csr
+  # Generate CSR with Admin Privilages
+  openssl x509 -req -in admin.csr -CA ca.crt -CAkey ca.key -out admin.crt
+  # Sign Certificate
+  ```
+- Output:
+  - `admin.key`, `admin.crt` → used in kubeconfig for authentication
+  - `O=system:masters` gives **admin privileges**.
+#### Step:3 Create Client Certs for Other Components
+- Repeat similar steps for:
+  - `kube-controller-manager`
+  - `kube-scheduler`
+  - `kubelet`
+  - `kubectl`
+- Each will have its own:
+  - Private key
+  - CSR
+  - Signed cert
+##### No Need to Provide **Admin Privileges** to All Client Certs
+- You **do NOT** give admin privileges to every component.
+- **Admin Privileges (e.g., `O=system:masters`)**
+  - Only needed for **actual users** (like `kube-admin`) who will perform admin tasks using `kubectl`.
+- **System Components (like `kubelet`, `scheduler`, `controller-manager`)**
+  - These use **dedicated identities** like:
+    - `/CN=system:kube-scheduler`
+    - `/CN=system:kube-controller-manager`
+    - `/CN=system:node:<node-name>/O=system:nodes`
+  - These identities get their **permissions via RoleBindings** or built-in roles.
+  - **Don't** assign them to `system:masters`.
+#### Step:4 Create `Server Certificates`
+- For **kube-apiserver**:
+  1. **Generate Private Key:**
+      ```bash
+      openssl genrsa -out apiserver.key 2048
+      ```
+  2. **Create OpenSSL Config File (with SANs):** Create a file named `apiserver-openssl.cnf`
+      - Needs cert with SANs for:
+        - `kubernetes`, `kubernetes.default`
+        - Service Cluster IP (`10.x.x.x`)
+        - Master node IPs
+        ```ini
+        [ req ]
+        req_extensions = v3_req
+        distinguished_name = req_distinguished_name
+        [ req_distinguished_name ]
+        [ v3_req ]
+        basicConstraints = CA:FALSE
+        keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+        extendedKeyUsage = serverAuth
+        subjectAltName = @alt_names
+        [ alt_names ]
+        DNS.1 = kubernetes
+        DNS.2 = kubernetes.default
+        DNS.3 = kubernetes.default.svc
+        DNS.4 = kubernetes.default.svc.cluster.local
+        IP.1 = 10.96.0.1  # Cluster IP of kube-apiserver
+        IP.2 = <Master_Node_IP>
+        ```
+  3. **Generate CSR (Certificate Signing Request):**
+      ```bash
+      openssl req -new -key apiserver.key -subj "/CN=kube-apiserver" \
+        -out apiserver.csr -config apiserver-openssl.cnf
+      ```
+  4. **Sign the CSR Using CA:**
+      ```bash
+      openssl x509 -req -in apiserver.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+        -out apiserver.crt -days 365 -extensions v3_req -extfile apiserver-openssl.cnf
+      ```
+- For **etcd server**:
+  - Needs server cert signed by CA with SANs for etcd hostnames/IPs
+### Important Notes
+- All certificates must be **signed by a trusted CA**.
+- Each component must be **configured with the correct certs**.
+- `kube-apiserver`, `etcd`, `kubelet` = require both **client** and **server** certificates depending on their role.
+
+## Viewing Certificates in an Existing Cluster
+- **Scenario:** You're a **new K8s administrator**, joining a team where **certificate issues** have been reported. Your task: **Perform a health check** of all TLS certificates in the cluster.
+### Step:1 `Know How the Cluster Was Set Up`
+- There are 2 common ways clusters are deployed:
+  1. **Manual (The Hard Way):**
+      - You generate and manage all certs manually
+      - Services run as OS services
+  2. **`kubeadm` Tool:**
+      - Certs are auto-generated by kubeadm
+      - Control plane runs as Pods
+- In this lecture, focus is on **kubeadm-based cluster**.
+### Step:2 `Identify All Certificate Files`
+- In `kubeadm` clusters, control plane manifests are located at:
+  ```bash
+  /etc/kubernetes/manifests/
+  ```
+- Look at files like:
+  - `kube-apiserver.yaml`
+  - `kube-controller-manager.yaml`
+  - `kube-scheduler.yaml`
+  - `etcd.yaml`
+- These files contain `--tls-cert-file`, `--tls-private-key-file`, `--client-ca-file`, etc. → gives cert file paths.
+### Step:3 `Inspect Each Certificate`
+- Use `openssl` to view certificate details:
+  ```bash
+  openssl x509 -in <path-to-cert> -text -noout
+  ```
+- Look for:
+  - `Subject:` → Name & Org (e.g., CN=admin, O=system:masters)
+  - `X509v3 Subject Alternative Name:` → List of valid DNS/IPs
+  - `Issuer:` → Should be Kubernetes CA
+  - `Not After:` → Expiry date
+- Make sure:
+  - Cert has **correct subject/organization**
+  - **All required SANs** (Alt names) are present
+  - Cert is **not expired**
+  - Issued by the correct **CA**
+- **Optional: `Track in a Spreadsheet`**
+  - Maintain details like:
+    - Path to cert
+    - Subject name
+    - SANs (Alt names)
+    - Organization
+    - Issuer
+    - Expiry date
+### Step:4 `Check Logs for Issues`
+- Depends on how the cluster is deployed:
+  1. **Manual/Hard Way:**
+     - Services run natively → Use OS logging (e.g., `journalctl`, `systemctl status`)
+  2. **kubeadm:**
+      - Components run as **pods** → Use `kubectl logs`:
+        ```bash
+        kubectl logs -n kube-system <pod-name>
+        ```
+      - **If Control Plane is Down:**
+        - `kubectl` might not work.
+        - Use `Docker` or `crictl` directly:
+          ```bash
+          docker ps -a
+          docker logs <container-id>
+                      (or)
+          crictl ps -a
+          crictl logs <container-id>
+          ```
+
+## Certificate API in Kubernetes
+- You're an **administrator**, and you need to **manage user access** via certificates.
+- Initially, certs are signed **manually** using a **CA server**, but as the team grows, you need an **automated way** — that's where **Kubernetes Certificate API** comes in.
+### Manual Certificate Management (Before Using Cert API)
+#### Adding a New Admin/User
+1. New user generates:
+   - A **private key**
+   - A **Certificate Signing Request (CSR)**
+2. Admin:
+   - Sends CSR to **CA server**
+   - Uses **CA's private key** to **sign the request**
+   - Returns the signed certificate to the user
+3. User now has:
+   - A valid **certificate + key pair**
+   - Can use it to authenticate with the cluster
+#### Certificate Expiry & Renewal
+- Certs have a **validity period**
+- On expiry, the **same CSR-signing process** must be repeated
+- This manual process becomes **tedious as users increase**
+### CA Server
+- A **Certificate Authority (CA)** is just a **private key and cert** pair.
+- Whoever has access to this pair can **sign certificates**.
+- Must be **secured and protected**
+- In `kubeadm`, these files are created on the **master node**
+  - So, **master node acts as the CA server**
+### Kubernetes Certificate API (For Automation)
+#### What It Does
+- Lets users **submit CSRs via API**
+- Admins can **approve/reject CSRs using kubectl**
+- Kubernetes signs cert using CA automatically
+#### Certificate API Workflow:
+1. **User:**
+   - Generates **private key** and **CSR**
+     ```bash
+     openssl genrsa -out jane.key 2048
+     openssl req -new -key jane.key -subj "/CN=jane" -out jane.csr
+     ```
+   - Encodes the CSR in **Base64**
+     ```bash
+     cat jane.csr | base64 -w 0
+     # Gives encoded data in single line
+     ```
+2. **Admin:**
+   - Creates a `CertificateSigningRequest` object in Kubernetes
+     - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+        - Select required API, in this case `CertificateSigningRequest`.
+     - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#certificatesigningrequest-v1-certificates-k8s-io) for the **CertificateSigningRequest Cluster APIs**.
+       - Based on **CertificateSigningRequest Cluster APIs** write YAML file:
+         ```yaml
+         apiVersion: certificates.k8s.io/v1
+         kind: CertificateSigningRequest
+         metadata:
+           name: new-admin
+         spec:
+           request: <base64-encoded-csr>
+           signerName: kubernetes.io/kube-apiserver-client
+           usages:
+           - client auth
+         ```
+     - Create CSR object in cluster:
+       ```bash
+       kubectl create -f jane.yaml
+       ```
+3. **Approve and Retrieve Certificate:**
+   - Check Pending CSRs:
+     ```bash
+     kubectl get csr
+     ```
+   - Approve the CSR:
+     ```bash
+     kubectl certificate approve <csr-name>
+     ```
+   - Get Signed Certificate:
+     ```bash
+     kubectl get csr <csr-name> -o yaml
+     ```
+   - Decode the Certificate:
+     ```bash
+     echo "<base64-certificate>" | base64 --decode
+     ```
+4. **Share the decoded Certificate with the User.**
+#### Commands
+- Deny the CSR:
+  ```bash
+  kubectl certificate deny agent-smith
+  ```
+- Delete CSR:
+  ```bash
+  kubectl delete csr agent-smith
+  ```
+#### Handling Certificate Approval in Kubernetes
+- The **Controller Manager** handles signing using CA files.
+- It has controllers like:
+  - `CSR-Approving`
+  - `CSR-Signing`
+- These are configured in the Controller Manager with:
+  - `--cluster-signing-cert-file`
+  - `--cluster-signing-key-file`
+
+## Kubeconfig in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/concepts/configuration/organize-cluster-access-kubeconfig/) for the Official docs.
+- A **kubeconfig file** stores Kubernetes **cluster access configurations**.
+- Used by `kubectl` to communicate with clusters without typing credentials every time.
+- Default location: `~/.kube/config`.
+- **Without kubeconfig:** You must manually provide server, cert, key, etc., for every `kubectl`/`curl` call.
+- **With kubeconfig:** This info is stored once in the file — `kubectl` uses it automatically.
+  ![preview](./Images/Kubernetes_CKA35.png)
+### Kubeconfig Structure
+- Kubeconfig has **three main sections**:
+  1. **Clusters:** API server info (e.g., name, server address, CA cert)
+  2. **Users:** User credentials (client cert & key)
+  3. **Contexts:** Connects a user to a cluster, optionally with a namespace.
+- [Refer Here](https://kubernetes.io/docs/reference/config-api/kubeconfig.v1/) for KubeConfig YAML refference Official docs.
+  ```yaml
+  apiVersion: v1
+  kind: Config
+  clusters:
+    - name: my-cluster
+      cluster:
+        server: https://<master-node-ip>:6443
+        certificate-authority: /path/to/ca.crt
+  users:
+    - name: my-user
+      user:
+        client-certificate: /path/to/cert.crt
+        client-key: /path/to/key.key
+  contexts:
+    - name: my-context
+      context:
+        cluster: my-cluster
+        user: my-user
+        namespace: dev
+  current-context: my-context
+  ```
+- **Understanding Contexts:**
+  - A **context = user + cluster (+ namespace)**.
+  - Example:
+    - Context `my-context` uses:
+      - Cluster: `my-cluster`
+      - User: `my-user`
+- **Commands:**
+  ```bash
+  kubectl config view
+  # View current kubeconfig
+  kubectl config current-context
+  # View current context
+  kubectl config use-context <context>
+  # Switch to a different context
+  kubectl config --kubeconfig=/custom/path/config use-context <context>
+  # Switch to a different context using different kubeconfig file
+  kubectl config get-contexts
+  # List all contexts
+  kubectl --kubeconfig=/custom/path/config get pods
+  # Test different kubeconfig file
+  ```
+### Setting a Custom Kubeconfig as Default (Persistent Setup)
+- Use your custom kubeconfig file (`/root/my-kube-config`) **by default** in all sessions without:
+  - Needing to use `--kubeconfig` in every command
+  - Overwriting the default file (`~/.kube/config`)
+- **Steps:**
+  1. **Open Shell Config File:** This file runs on every terminal session (like `.bashrc` for Bash users).
+     ```bash
+     vi ~/.bashrc
+     ```
+  2. **Add this line to set your Custom Kubeconfig:**
+     ```bash
+     export KUBECONFIG=/root/my-kube-config
+     ```
+  3. **Apply the Changes:** Reload the shell config in the current session.
+     ```bash
+     source ~/.bashrc
+     ```
+- **Notes:**
+  - This sets your kubeconfig **persistently** for all future terminal sessions.
+  - The change is **per-user** unless done in a global profile like `/etc/profile`.
+  - If you're using Zsh, use `~/.zshrc` instead of `~/.bashrc`.
+
+## Kubernetes API Groups
+- Understanding API groups is **important for authorization**, RBAC, and interacting with Kubernetes resources effectively.
+- Kubernetes API = Interface to interact with the **kube-apiserver**.
+- All tools like `kubectl` or `REST calls` talk to the **API server**.
+- API server runs on the **master node**, usually accessible at:
+  ```
+  https://<master-node-ip>:6443
+  ```
+- **Accessing the API:**
+  - To check version:
+    ```bash
+    curl https://<master-ip>:6443/version
+    ```
+  - To list pods:
+    ```bash
+    curl https://<master-ip>:6443/api/v1/pods
+    ```
+### API Groups
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/) for the Official docs.
+- API is split into **groups** for better organization.
+  1. **Core Group**
+      - Contains **core objects**:
+        - `pods`, `namespaces`, `services`, `secrets`, `configmaps`, `nodes`, `persistentvolumes`, etc.
+      - Referred to as **`v1`**, not named.
+  2. **Named Groups**
+      - Organized by purpose/feature area.
+      - Examples:
+        - `apps` → Deployments, StatefulSets, ReplicaSets
+        - `batch` → CronJobs, Jobs
+        - `networking.k8s.io` → Network Policies
+        - `rbac.authorization.k8s.io` → Roles, RoleBindings
+        - `certificates.k8s.io` → CSR (Certificate Signing Requests)
+### Resources and Verbs
+- Each API group contains **resources**.
+- Each resource supports **verbs** (actions), like:
+  - `get`, `list`, `create`, `delete`, `update`, `watch`
+- **Example:**
+  ```bash
+  kubectl get deployments
+  ```
+  - `deployments` → resource
+  - `get` → verb
+  ![preview](./Images/Kubernetes_CKA36.png)
+### View API Groups in Cluster
+- Directly list available groups:
+  ```bash
+  curl https://<master-ip>:6443/apis
+  ```
+- You will likely get an **unauthorized** error unless you **authenticate**.
+- **To Authenticate:**
+  - Use certificate files:
+    ```bash
+    curl --cert client.crt --key client.key --cacert ca.crt https://<master-ip>:6443/apis
+    ```
+  - Or use **`kubectl proxy`** for easier access:
+    ```bash
+    kubectl proxy
+    # Now open: http://localhost:8001/
+    ```
+### kubectl proxy vs kube-proxy
+- `kube-proxy` → Handles **networking** between pods/services
+- `kubectl proxy` → Creates a **local proxy** to the kube-apiserver using your kubeconfig credentials
+
+## Authorization in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/reference/access-authn-authz/authorization/) for the Official docs.
+- After a user or system **authenticates**, **Authorization** decides **what they can do**.
+- As a **cluster admin**, you have full access, but:
+  - Developers, testers, apps (e.g., Jenkins) **should have limited access**.
+  - E.g., developers may deploy apps but **not modify cluster configs**.
+- **Use Cases:**
+  - Prevent users from making unwanted changes.
+  - Give **minimum required access** to service accounts.
+  - **Restrict access to specific namespaces** when multiple teams use the cluster.
+### Types of Authorization Modes
+1. **Node Authorization**
+    - Used **internally** for **kubelets** (nodes).
+    - Requests from `system:nodes` group with names like `system:node:<node-name>`.
+    - Lets nodes read/write pods, report status, etc.
+    - Configured automatically.
+2. **Attribute-Based Access Control (ABAC)**
+    - Old method using a **JSON policy file** with user permissions.
+    - Policy file passed to `kube-apiserver` at startup.
+    - **Manual and hard to manage** — needs file edits + API server restart.
+    - Not recommended for dynamic environments.
+3. **Role-Based Access Control (RBAC)** (Recommended & Default)
+    - Define **Roles** with permissions.
+    - Assign users/groups to roles using **RoleBindings** or **ClusterRoleBindings**.
+    - Easy to manage — update a Role and it applies to all users bound to it.
+    - **Most common method** used in production.
+4. **Webhook Authorization**
+    - External authorization via **custom APIs** (e.g., Open Policy Agent).
+    - `kube-apiserver` sends request data to an external service.
+    - External service decides allow/deny.
+    - **Flexible and powerful** for advanced policies.
+5. **AlwaysAllow & AlwaysDeny**
+    - **AlwaysAllow**: Grants all requests (used by default if nothing is configured).
+    - **AlwaysDeny**: Blocks all requests (mostly for testing/debugging).
+    - Not used in production.
+### Configure Authorization Modes
+- Set using `--authorization-mode` flag in the `kube-apiserver`.
+- You can use **multiple modes** separated by commas:
+  ```bash
+  --authorization-mode=Node,RBAC,Webhook
+  ```
+- **Working of Multiple Modes:**
+  - Requests pass through **each mode in order**:
+    - If one mode **allows**, access is **granted** (no further checks).
+    - If a mode **denies**, it moves to the **next**.
+    - If all modes **deny**, access is denied.
+
+## Role-Based Access Control (RBAC) in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) for the Official docs.
+- RBAC is used to **control what users can do** once they are **authenticated**.
+- It allows you to **assign permissions** to users or groups.
+### Creating a Role
+- A **Role** defines **what actions** (verbs) can be performed on **which resources** in a **specific namespace**.
+- You create it using a YAML file:
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `Role`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#role-v1-rbac-authorization-k8s-io) for the **Role Cluster APIs**.
+    - Based on **Role Cluster APIs** write YAML file:
+      ```yaml
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        namespace: default
+        name: developer
+      rules:
+      - apiGroups: [""]   # "" for core API group (pods, services, etc.)
+        resources: ["pods"]
+        verbs: ["get", "list", "create", "delete"]
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["create"]
+      ```
+    - You can define **multiple rules** in one Role.
+  - **Create Role with `kubectl`**:
+    ```bash
+    kubectl create -f role.yaml
+    ```
+### Binding the Role to a User
+- A **RoleBinding** links a **user (subject)** to a **Role**.
+- You create it using a YAML file:
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `RoleBinding`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#rolebinding-v1-rbac-authorization-k8s-io) for the **RoleBinding Cluster APIs**.
+    - Based on **RoleBinding Cluster APIs** write YAML file:
+      ```yaml
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: dev-user-rolebinding
+        namespace: default
+      subjects:
+      - kind: User
+        name: dev-user
+        apiGroup: rbac.authorization.k8s.io
+      roleRef:
+        kind: Role
+        name: developer
+        apiGroup: rbac.authorization.k8s.io
+      ```
+  - **Create RoleBinding with `kubectl`**:
+    ```bash
+    kubectl create -f rolebinding.yaml
+    ```
+  ![preview](./Images/Kubernetes_CKA37.png)
+### Namespace Scope
+- **Roles and RoleBindings are namespaced**.
+- To give access in another namespace, specify it under `metadata.namespace`.
+### View RBAC Resources
+- Commands:
+  ```bash
+  kubectl get roles -n <namespace>
+  # List roles
+  kubectl describe role <role-name> -n <namespace>
+  # View role details
+  kubectl edit role <role-name> -n <namespace>
+  # Edit the role
+  kubectl get rolebindings -n <namespace>
+  # List role bindings
+  kubectl describe rolebinding <binding-name> -n <namespace>
+  # View role binding details
+  ```
+### Check Access Using `kubectl auth can-i`
+- To check **your** permissions:
+  ```bash
+  kubectl auth can-i create pods
+  kubectl auth can-i delete nodes
+  ```
+- To check as **another user** (impersonation):
+  ```bash
+  kubectl auth can-i create deployments --as=dev-user
+  kubectl auth can-i create pods -n test --as=dev-user
+  ```
+### Fine-Grained Access with `resourceNames`
+- You can give access to **specific named resources only**:
+  ```yaml
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["blue-pod", "orange-pod"]
+    verbs: ["get", "delete"]
+  ```
+
+## ClusterRoles and ClusterRoleBindings
+### ClusterRole
+- Some resources like `nodes`, `persistentvolumes`, `namespaces`, etc., are **cluster-scoped**, not tied to any namespace.
+- To give access to these, you use a **ClusterRole**.
+- **Examples of Cluster-scoped Resources**:
+  - `nodes`
+  - `persistentvolumes`
+  - `namespaces`
+  - `certificatesigningrequests`
+- To check what resources are namespaced or not:
+  ```bash
+  kubectl api-resources --namespaced=true
+  # For namespaced resources
+  kubectl api-resources --namespaced=false
+  # For cluster-scoped resources
+  ```
+### Creating a ClusterRole
+- ClusterRole YAML looks similar to a Role, just with `kind: ClusterRole` and **no namespace**.
+- Create it using a YAML file:
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `ClusterRole`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#clusterrole-v1-rbac-authorization-k8s-io) for the **ClusterRole Cluster APIs**.
+    - Based on **ClusterRole Cluster APIs** write YAML file:
+      ```yaml
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: cluster-admin-role
+      rules:
+      - apiGroups: [""]
+        resources: ["nodes"]
+        verbs: ["get", "list", "create", "delete"]
+      ```
+  - **Create ClusterRole with `kubectl`**:
+    ```bash
+    kubectl create -f clusterrole.yaml
+    ```
+- **Use Case**: Provide access to cluster-wide resources like nodes or PVs.
+### Creating a ClusterRoleBinding
+- Links a **user/group** to a **ClusterRole**.
+- Gives the user **access across the entire cluster**.
+- Create it using a YAML file:
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `ClusterRoleBinding`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#clusterrolebinding-v1-rbac-authorization-k8s-io) for the **ClusterRoleBinding Cluster APIs**.
+    - Based on **ClusterRoleBinding Cluster APIs** write YAML file:
+      ```yaml
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: cluster-admin-binding
+      subjects:
+      - kind: User
+        name: cluster-admin-user
+        apiGroup: rbac.authorization.k8s.io
+      roleRef:
+        kind: ClusterRole
+        name: cluster-admin-role
+        apiGroup: rbac.authorization.k8s.io
+      ```
+  - **Create RoleBinding with `kubectl`**:
+    ```bash
+    kubectl create -f clusterrolebinding.yaml
+    ```
+  ![preview](./Images/Kubernetes_CKA38.png)
+### ClusterRole for Namespaced Resources
+- You **can** use a **ClusterRole** to give access to **namespaced resources** (like `pods`).
+- In that case, the user gets **access to that resource in all namespaces**.
+- **Example:**
+  - A `ClusterRole` allowing access to `pods` will allow access to pods in **every** namespace.
+### View, Edit and Test
+- Commands:
+  ```bash
+  kubectl get clusterroles
+  # List ClusterRoles
+  kubectl describe clusterrole <name>
+  # Describe ClusterRole
+  kubectl get clusterrolebindings
+  # List ClusterRoleBindings
+  kubectl edit clusterrole <name>
+  # Edit ClusterRole
+  kubectl auth can-i get nodes --as=cluster-admin-user
+  # Test access
+  ```
+
+## Kubernetes Service Accounts
+- [Refer Here](https://kubernetes.io/docs/concepts/security/service-accounts/) for the Official docs.
+- **Used by apps/processes** (not humans) to interact with the Kubernetes API.
+- **Example:** Prometheus, Jenkins, custom dashboard apps use service accounts to query Kubernetes resources.
+- Kubernetes has two types of accounts:
+  1. **User Accounts**: For humans (e.g., admins, developers).
+  2. **Service Accounts**: For pods/applications.
+- **Commands:**
+  ```bash
+  kubectl create serviceaccount <name>
+  # Create a service account
+  kubectl get serviceaccount
+  # Lists all service accounts
+  kubectl describe serviceaccount <name>
+  # Shows service account details
+  ```
+### When You Create a Service Account
+- A **ServiceAccount object** is created.
+- A **token** is automatically generated.
+- The token is stored as a **Secret** object.
+- That **Secret** is linked to the Service Account.
+- **Commands:**
+  - You can view the token with:
+    ```bash
+    kubectl describe secret <secret-name>
+    ```
+  - Use this token for API authentication:
+    ```bash
+    curl --header "Authorization: Bearer <token>" https://<k8s-api-server>
+    ```
+### Using a Service Account in a Pod (App inside Kubernetes)
+- If app is running inside Kubernetes, the token can be **automatically mounted** as a volume.
+- **Default Behavior:**
+  - Every namespace has a **default service account**.
+  - Every pod gets the default token mounted at:
+    ```
+    /var/run/secrets/kubernetes.io/serviceaccount
+    ```
+- To use a **custom service account** in a pod, add `serviceAccountName` in pod `spec`:
+  ```yaml
+  spec:
+    serviceAccountName: dashboard-sa
+  ```
+- **Note:**
+  - You **cannot change** the service account of a running pod.
+  - Delete & recreate pod OR use a **Deployment** (which handles rollout automatically).
+#### Disable Automatic Mount of Service Account Token
+- Add this in your pod spec:
+  ```yaml
+  automountServiceAccountToken: false
+  ```
+### RBAC: Give Permissions to Service Account
+1. **Create a Role** (namespace-specific) or **ClusterRole** (cluster-wide).
+    ```yaml
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: pod-reader
+      namespace: default
+    rules:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list"]
+    ```
+2. **Bind** the Role to the Service Account using a **RoleBinding** or **ClusterRoleBinding**.
+    ```yaml
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: read-pods
+      namespace: default
+    subjects:
+    - kind: ServiceAccount
+      name: dashboard-sa
+      namespace: default
+    roleRef:
+      kind: Role
+      name: pod-reader
+      apiGroup: rbac.authorization.k8s.io
+    ```
+### Changes in Kubernetes 1.22 and 1.24
+- **Before v1.22**
+  - Token created as a secret.
+  - Token had **no expiry** and was **not audience-bound**.
+  - Less secure and had **scalability issues**.
+- **v1.22 — Introduced `TokenRequest API`:**
+  - New tokens are:
+    - **Time-bound** (auto-expire, e.g., 1 hour).
+    - **Audience-bound**.
+    - **Scoped to specific pods**.
+  - Tokens are now **mounted as projected volumes** instead of secrets.
+- **v1.24 — Further Changes:**
+  - **No token secret created automatically** with service account.
+  - To manually create a token:
+    ```bash
+    kubectl create token <service-account-name>
+    ```
+  - The output token has an **expiry** (default: 1 hour).
+  - You can specify custom expiry using flags.
+  - If you still want a secret like old behavior:
+    - You have to **manually create a secret** and bind it.
+
+## Securing Images in Kubernetes
+- **Image Naming Basics:**
+  - Kubernetes uses **Docker image naming conventions**.
+  - When you specify an image like `nginx`, it's actually:
+    ```
+    docker.io/library/nginx
+    ```
+  - **`library`**: Default Docker Hub namespace for official images.
+  - If using a **custom account/repo**, it would look like:
+    ```
+    docker.io/mycompany/myapp
+    ```
+  ![preview](./Images/Kubernetes_CKA39.png)
+- **Images are Pulled From:**
+  - If no registry is mentioned, images are pulled from **Docker Hub** by default (`docker.io`).
+  - Example registries:
+    - Docker Hub: `docker.io`
+    - Google Container Registry: `gcr.io`
+    - AWS ECR, Azure ACR, GCP Artifact Registry – all support **private registries**.
+- **Public vs Private Registries:**
+  - **Public Registry**: Anyone can pull images (like `nginx`, `redis`).
+  - **Private Registry**: Requires authentication (credentials needed).
+  - Good for:
+    - Internal company images.
+    - Sensitive apps not for public access.
+### Using Private Images in Kubernetes
+#### Create Kubernetes Secret
+1. **From Docker Private Registry:**
+    - Create a Docker Registry Secret:
+      ```bash
+      kubectl create secret docker-registry regcred \
+        --docker-server=<registry-url> \
+        --docker-username=<your-username> \
+        --docker-password=<your-password> \
+        --docker-email=<your-email>
+      ```
+2. **From AWS ECR (Elastic Container Registry):**
+    - Authenticate and get Docker credentials (Use AWS CLI to get a Docker login token and authenticate):
+      ```bash
+      aws ecr get-login-password --region <your-region> | docker login --username AWS --password-stdin <aws_account_id>.dkr.ecr.<region>.amazonaws.com
+      ```
+    - Create Kubernetes Secret:
+      ```bash
+      kubectl create secret docker-registry regcred \
+        --docker-server=<aws_account_id>.dkr.ecr.<region>.amazonaws.com \
+        --docker-username=AWS \
+        --docker-password=$(aws ecr get-login-password --region <your-region>) \
+        --docker-email=<your-email>
+      ```
+3. **From Azure ACR (Azure Container Registry):**
+    - Login to ACR:
+      ```bash
+      az acr login --name <registry-name>
+      ```
+    - Create Docker Registry Secret:
+      - Get ACR credentials (you need username and password):
+        ```bash
+        az acr credential show --name <registry-name>
+        ```
+      - Then use the username and password to create a secret:
+        ```bash
+        kubectl create secret docker-registry regcred \
+          --docker-server=<registry-name>.azurecr.io \
+          --docker-username=<username-from-above> \
+          --docker-password=<password-from-above> \
+          --docker-email=<your-email>
+        ```
+#### Use Secret in Pod YAML
+- Pod YAML with `imagePullSecrets`:
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: private-app
+  spec:
+    containers:
+    - name: myapp
+      image: myregistry.io/myorg/myapp:latest
+    imagePullSecrets:
+    - name: regcred
+  ```
+- `imagePullSecrets` tells kubelet how to pull from a **private registry**.
+### Note
+- **Kubernetes doesn't do the pulling** — the **container runtime** (like Docker or containerd) on the **node** does.
+- The secret must be in the **same namespace** as the pod.
+- You can reuse the same secret in multiple pods.
+
+## Docker Security Concepts (Pre-requisite for K8s Security Context)
+- **Docker Containers vs. Host OS:**
+  - Docker containers share the **host's kernel**, not isolated like VMs.
+  - They use **Linux namespaces** for isolation.
+  - A container's process (e.g., `sleep 3600`) runs in a different **namespace**, but actually runs on the host.
+  - Example:
+    - Inside container: `sleep` has PID = 1.
+    - On host: same process exists but has a different PID.
+- **Users in Docker:**
+  - By default, containers run as **root user** inside.
+  - This can be a **security risk**.
+  - You can run containers as a non-root user:
+    - Option 1: At runtime  
+      ```bash
+      docker run -u 1000 ubuntu sleep 3600
+      ```
+    - Option 2: At image build  
+      ```dockerfile
+      FROM ubuntu
+      USER 1000
+      ```
+- **Root User Limitations in Docker:**
+  - **Root inside container ≠ Root on host** (limited permissions).
+  - Docker uses **Linux capabilities** to restrict root inside the container.
+- **Linux Capabilities (Controlled Access):**
+  - Instead of giving full root access, Docker gives containers only a **subset of capabilities**.
+  - Examples of restricted capabilities:
+    - Rebooting host
+    - Modifying network interfaces
+    - Killing system processes
+    - Changing file permissions globally
+- **Modify Capabilities:**
+  - Add more capabilities:
+    ```bash
+    docker run --cap-add=NET_ADMIN ubuntu
+    ```
+  - Drop capabilities:
+    ```bash
+    docker run --cap-drop=MKNOD ubuntu
+    ```
+  - Grant full privileges (not recommended):
+    ```bash
+    docker run --privileged ubuntu
+    ```
+- These foundational Docker concepts help you understand **Security Contexts in Kubernetes**, where similar controls exist (like `runAsUser`, `capabilities`, `privileged`, etc.).
+
+## Security Context in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/tasks/configure-pod-container/security-context/) for the Official docs.
+- Security Context defines **security settings** (like user ID, capabilities, privileges, etc.) for **Pods or containers** in Kubernetes.
+- **You can define it:**
+  - **At Pod level** – applies to **all containers** in the pod.
+  - **At Container level** – applies to that **specific container only**.
+  - If both are defined → **Container-level settings override** Pod-level settings.
+- **Common Security Context Fields:**
+  - `runAsUser` → Runs container processes as a specific **UID**.
+  - `runAsGroup` → Runs container processes with a specific **GID**.
+  - `fsGroup` → Sets group ID for mounted volumes.
+  - `capabilities` → Add/remove **Linux capabilities** (e.g., `NET_ADMIN`, `SYS_TIME`).
+  - `privileged` → Set to `true` to run the container with **all capabilities** (not recommended).
+### Example
+- Pod-Level Security Context:
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: secure-pod
+  spec:
+    securityContext:
+      runAsUser: 1000   # All containers will run as UID 1000
+    containers:
+    - name: ubuntu
+      image: ubuntu
+      command: ["sleep", "3600"]
+  ```
+- Container-Level Security Context (Overrides Pod level):
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: container-secure
+  spec:
+    containers:
+    - name: ubuntu
+      image: ubuntu
+      command: ["sleep", "3600"]
+      securityContext:
+        runAsUser: 2000         # Overrides pod-level setting
+        capabilities:
+          add: ["NET_ADMIN"]    # Adds extra Linux capability
+          drop: ["ALL"]         # Drops all others
+  ```
+
+## Kubernetes Network Policies
+- [Refer Here](https://kubernetes.io/docs/concepts/services-networking/network-policies/) for the Official docs.
+- Network Policies **control network traffic** between pods at **Layer 3 & 4** (IP + Port level).
+- They define **rules for ingress (incoming)** and **egress (outgoing)** traffic to/from pods.
+- You apply it to pods using **labels** (like with services or replica sets).
+- It only affects pods selected by `podSelector`.
+- **Types of Traffic:**
+  - **Ingress:** Traffic coming into a pod
+  - **Egress:** Traffic going out from a pod
+- **Use of Network Policies:**
+  - **Without any policy:** All pods can communicate with each other freely (default allow).
+  - **With policies:** You can **restrict traffic** between pods, based on labels, namespaces, ports, etc.
+- **Key Concepts:**
+  - **NetworkPolicy** is applied at the pod level using `podSelector`.
+  - You can allow traffic **only from specific pods or namespaces**.
+  - Policy does **not affect** pods outside the selected pod unless they are matched by a rule.
+- **Let’s take a `simple 3-tier app` example:**
+  ```
+  User → Web Server (port 80) → API Server (port 5000) → DB Server (port 3306)
+  ```
+  ![preview](./Images/Kubernetes_CKA40.png)
+### Example Scenario's
+#### Apply Policy to DB Pod - Only Access API Server
+- **Use a NetworkPolicy with:**
+  - `podSelector` → Select DB pod
+  - `policyTypes: [Ingress]` → Block other ingress
+  - `ingress.from.podSelector` → Allow only API pods
+  - `ingress.ports.port: 3306` → Only allow port 3306
+- **NetworkPolicy YAML Configuration:**
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `NetworkPolicy`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#networkpolicy-v1-networking-k8s-io) for the **NetworkPolicy Cluster APIs**.
+    - Based on **NetworkPolicy Cluster APIs** write YAML file:
+      ```yaml
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: db-policy
+        namespace: default
+      spec:
+        podSelector:
+          matchLabels:
+            role: db          # Select DB pods only
+        policyTypes:
+        - Ingress             # Apply only to incoming traffic
+        ingress:
+        - from:
+          - podSelector:
+              matchLabels:
+                role: api     # Only allow traffic from API pods
+          ports:
+          - protocol: TCP
+            port: 3306        # Only allow MySQL port
+      ```
+  - **What this does:**
+    - Applies to pods with label `role: db`
+    - Allows only traffic from pods with label `role: api`
+    - Only on TCP port `3306`
+    - All other incoming traffic is blocked
+  - **Commands:**
+    ```sh
+    kubectl apply -f <network-policy.yaml>
+    # Create a Network Policy
+    kubectl get netpol
+    # View All Network Policies
+    kubectl describe netpol <policy-name>
+    # Describe a Specific Network Policy
+    kubectl get pods --show-labels
+    # Check Pod Labels
+    ```
+#### Allow only `API Pod` in the `prod` namespace
+- **NetworkPolicy YAML Configuration:**
+  ```yaml
+  from:
+    - podSelector:
+        matchLabels:
+          app: api
+      namespaceSelector:
+        matchLabels:
+          name: prod
+  ```
+  - **AND condition**: Must match both pod and namespace.
+- **Small Mistake → Big Impact:**
+  - If you write `podSelector` and `namespaceSelector` as **separate rules** (with `-`), then:
+    - They become **OR conditions**
+    - You might **unintentionally allow more traffic** (e.g., from all pods in prod namespace)
+#### External Access - `ipBlock`
+- If an **external backup server** (e.g., `192.168.5.10`) needs access.
+  - **Ingress from external IP:**
+    ```yaml
+    from:
+      - ipBlock:
+          cidr: 192.168.5.10/32
+    ```
+  - **Egress to external IP (from DB pod):**
+    ```yaml
+    policyTypes:
+      - Egress
+    egress:
+      - to:
+          - ipBlock:
+              cidr: 192.168.5.10/32
+        ports:
+          - protocol: TCP
+            port: 80
+    ```
+### NetworkPolicy - Ingress Behavior Comparison
+1. **With `ingress: [{}]`**
+    ```yaml
+    policyTypes:
+      - Egress
+      - Ingress
+    ingress:
+      - {}
+    ```
+    - Allows ingress **only from all pods** inside the cluster.
+    - Does **not** allow traffic from external IPs (like curl from your laptop).
+    - Good for **restricting to internal traffic** only.
+2. **No `ingress` section**
+    ```yaml
+    policyTypes:
+      - Egress
+    # ingress not defined
+    ```
+    - Ingress is **open by default**.
+    - Allows traffic from **any source** (pods + external IPs).
+    - No restriction on who can access.
+### Important Points
+- `podSelector` → Selects specific pods (e.g., DB pod)
+- `policyTypes` → Choose to isolate `Ingress`, `Egress`, or both
+- `ingress` → Allow incoming traffic
+- `egress` → Allow outgoing traffic
+- `ipBlock` → Allow specific IPs (outside cluster)
+- `namespaceSelector` → Selects pods in specific namespaces
+- `AND Condition` → Combine selectors under the same rule
+- `OR Condition` → Use multiple entries in `from:` or `to:`
+### Network Plugin Support
+- Not all CNI plugins support Network Policies.
+- The Plugins `Calico`, `Cilium`, `Kube-Router` and `Weave` supports Network Policy.
+- The `Flannel` Plugin doesn't support Network Policy.
+- You **can create policies** even on unsupported plugins, but **they won’t be enforced**, and you won’t get an error.
+
+## Kubectx and Kubens – Command Line Utilities
+- In production or large environments:
+  - You often switch between **multiple namespaces and clusters**.
+  - Using only `kubectl` commands can be **tedious and confusing**.
+- These tools make it **easy and fast** to switch between **contexts** (clusters) and **namespaces**.
+### `Kubectx` – Manage Contexts (Clusters)
+- Switch between **Kubernetes contexts (clusters)** easily.
+- Avoids using long `kubectl config` commands.
+- **Installation:**
+  ```bash
+  sudo git clone https://github.com/ahmetb/kubectx /opt/kubectx
+  sudo ln -s /opt/kubectx/kubectx /usr/local/bin/kubectx
+  ```
+- **Commands:**
+  ```bash
+  kubectx
+  # List all contexts
+  kubectx <context_name>
+  # Switch to another context
+  kubectx -
+  # Go back to previous context
+  kubectx -c
+  # Show current context
+  ```
+### `Kubens` – Manage Namespaces
+- Switch between **namespaces** quickly.
+- **Installation:**
+  ```bash
+  sudo git clone https://github.com/ahmetb/kubectx /opt/kubectx
+  sudo ln -s /opt/kubectx/kubens /usr/local/bin/kubens
+  ```
+- **Commands:**
+  ```bash
+  kubens <namespace>
+  # Switch to a different namespace
+  kubens -
+  # Go back to previous namespace
+  ```
+
+## Custom Resource Definitions (CRDs)
+- [Refer Here](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/) for the Official docs.
+### Resource in Kubernetes
+- A **resource** is an object like a **Deployment**, **Pod**, **Service**, etc.
+- These are stored in the **etcd** datastore.
+- You can `create`, `list`, `modify`, or `delete` these using `kubectl`.
+### Role of a Controller
+- A **controller** watches resources and makes sure their actual state matches the desired state.
+- Example: The **Deployment Controller**:
+  - Creates a **ReplicaSet**.
+  - ReplicaSet creates the required number of **Pods**.
+- Controllers run in the background and are built into Kubernetes for standard resources.
+### Custom Resources
+- You might want Kubernetes to handle **your own types of objects**, like a `FlightTicket`.
+- This is not a built-in resource, so you need to:
+  1. **Define** it using a **Custom Resource Definition (CRD)**.
+  2. Optionally, **create a controller** to manage it.
+#### Example Custom Resource: `FlightTicket`
+```yaml
+apiVersion: flights.com/v1
+kind: FlightTicket
+metadata:
+  name: my-flight-ticket
+spec:
+  from: Mumbai
+  to: London
+  number: 2
+```
+- This defines a new object type.
+- You want this to trigger an actual API call to book a flight.
+#### Problem: `CRD Not Found Error`
+- If you try to create `FlightTicket` without defining it first:
+  ```
+  error: no matches for kind "FlightTicket" in version "flights.com/v1"
+  ```
+#### Solution: `Create a Custom Resource Definition (CRD)`
+- **YAML Configuration:**
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `CustomResourceDefinition`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#customresourcedefinition-v1-apiextensions-k8s-io) for the **CustomResourceDefinition Metadata APIs**.
+    - Based on **CustomResourceDefinition Metadata APIs** write YAML file:
+      ```yaml
+      apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      metadata:
+        name: flighttickets.flights.com
+      spec:
+        group: flights.com
+        scope: Namespaced
+        names:
+          plural: flighttickets
+          singular: flightticket
+          kind: FlightTicket
+          shortNames:
+            - ft
+        versions:
+          - name: v1
+            served: true
+            storage: true
+            schema:
+              openAPIV3Schema:
+                type: object
+                properties:
+                  spec:
+                    type: object
+                    properties:
+                      from:
+                        type: string
+                      to:
+                        type: string
+                      number:
+                        type: integer
+                        minimum: 1
+                        maximum: 5
+      ```
+- **Key Fields Explained:**
+  - **group** → API group, e.g., `flights.com`
+  - **scope** → `Namespaced` or `Cluster`
+  - **names**:
+    - `kind`: your object type
+    - `plural`: for API (`kubectl get flighttickets`)
+    - `shortNames`: alias like `kubectl get ft`
+  - **versions**:
+    - `served`: true = available via API
+    - `storage`: true = used in etcd
+    - `schema`: OpenAPI v3 schema to validate input
+### CRD vs Custom Controller
+- **CRD** → Allows creation of new resource types (e.g., FlightTicket)
+- **Custom Controller** → Watches those resources and **performs actions** (e.g., call a booking API)
+### Without a Controller
+- You **can create** a `FlightTicket` resource.
+- But it will **just sit in etcd** — no action happens.
+- You need a **Custom Controller** to act on it.
+
+## Custom Controllers in Kubernetes
+- A **controller** is a **looping process** that continuously monitors the Kubernetes cluster.
+- It **watches** for changes (events) to Kubernetes objects (e.g., Custom Resources like `FlightTicket`) and **takes action**.
+- Example: Watch for a `FlightTicket` object and call an external flight booking API.
+### Need of custom controller
+- We created a **Custom Resource Definition (CRD)** (e.g., `FlightTicket`) which stores data in **etcd**.
+- But to perform **actions** (book, edit, cancel flights), we need a **controller** to monitor CRD status and act accordingly.
+### Working of Custom Controller
+- Continuously **watches** for changes in custom resources.
+- Takes action based on those changes (e.g., API call to book flight).
+- It interacts with the **Kubernetes API Server** to get data and make changes.
+### Ways to Build a Controller
+- **Python**: Possible, but hard to manage performance, caching, queuing, etc.
+- **Go (Golang)**: Recommended because:
+  - Has Kubernetes **Go client**.
+  - Supports **Shared Informers** (for caching and event queuing).
+  - More efficient and standardized for Kubernetes.
+#### Steps to Build a Custom Controller (using Go)
+1. **Install Go** (if not already).
+2. Clone this repo:  
+   - [https://github.com/kubernetes/sample-controller](https://github.com/kubernetes/sample-controller)
+3. Modify the `controller.go` file with your custom logic.
+   - Example: Add code to call the flight booking API.
+4. **Build** the controller code.
+5. **Run** the controller locally using your `kubeconfig` to access the cluster.
+6. Once tested, package it in a **Docker image**.
+7. Deploy it in your cluster as a **Pod** or **Deployment**.
+
+## Kubernetes Operators
+- An **Operator** combines:
+  - A **Custom Resource Definition (CRD)**  
+  - A **Custom Controller**
+- It **automates** the deployment and management of applications in Kubernetes.
+### Use of an Operator
+- Without an operator:
+  - You create CRDs and custom resources **manually**.
+  - You deploy the custom controller **separately**.
+- With an operator:
+  - Everything (CRD + Controller) is packaged and deployed **together**.
+  - You deploy **one entity**, and it does all the work.
+### An Operator Do
+- Watches for changes in the custom resource (like a controller).
+- Automatically **manages the lifecycle** of the application.
+- Can perform tasks like:
+  - Install the application
+  - Monitor health
+  - **Take backups**
+  - **Restore from backups**
+  - Handle **failures** or auto-scaling
+### Real-World Example: `etcd-operator`
+- Manages the deployment of **etcd clusters** inside Kubernetes.
+- Defines a CRD: `EtcdCluster`
+- Operator watches this CRD and:
+  - Creates etcd pods
+  - Takes etcd backups
+  - Restores from backup using other CRDs (`EtcdBackup`, `EtcdRestore`)
+### Find the Operators
+- Visit: **[OperatorHub.io](https://operatorhub.io)**
+- Examples of available Operators:
+  - etcd
+  - MySQL
+  - Prometheus
+  - Grafana
+  - Istio
+  - Argo CD
+- Each operator page includes:
+  - What it does
+  - Installation instructions
+### Using of an Operator
+1. **Install Operator Lifecycle Manager (OLM)** – helps manage the operators.
+2. **Install the Operator** (via OperatorHub or YAML).
+3. **Create CRs** to deploy and manage the actual application.
