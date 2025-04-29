@@ -4474,3 +4474,421 @@ spec:
 1. **Install Operator Lifecycle Manager (OLM)** – helps manage the operators.
 2. **Install the Operator** (via OperatorHub or YAML).
 3. **Create CRs** to deploy and manage the actual application.
+
+
+# <p align="center">Storage</p>
+
+## Storage in Docker (Foundation for Kubernetes)
+- In **Docker**, storage mainly involves two important concepts:
+  1. **Storage Drivers:**
+      - **Storage Drivers** manage **how container filesystems** are stored and handled.
+      - They control **read/write** operations inside containers.
+  2. **Volume Drivers:**
+      - **Volume Drivers** manage **external storage** like **host directories, cloud storage, or remote storage systems**.
+      - Helps **persist data** even if containers are removed.
+### Docker Storage Drivers (Container Filesystem)
+#### Storing Data in Docker
+- When Docker is installed, it creates a default data directory: **`/var/lib/docker/`**.
+- Inside `/var/lib/docker/`, you’ll find directories like:
+  - **`containers/`** → container data
+  - **`image/`** → image data
+  - **`volumes/`** → persistent storage volumes
+- Docker stores all container, image, and volume data under `/var/lib/docker/`.
+#### Docker Layered Architecture
+- Docker builds images **in layers**.
+- Each **Dockerfile instruction** creates **one new layer**.
+- Example:
+  1. Base Ubuntu OS layer
+  2. Install APT packages
+  3. Install Python dependencies
+  4. Copy application source code
+  5. Set entry point
+- **Advantages of Layered Architecture**:
+  - **Reuses** layers if they are **same** (caching).
+  - **Speeds up builds**.
+  - **Saves disk space**.
+- **Built layers are read-only.**
+#### Container Writable Layer
+- When a container runs:
+  - A new **writeable layer** is added **on top** of the image layers.
+- **Writable Layer**:
+  - Stores temporary files, logs, changes made inside the container.
+  - **Deleted** when container is **removed**.
+- **Image layers are shared** between containers, but the writeable layer is **unique per container**.
+#### Copy-on-Write Mechanism
+- If you **modify a file** from the image inside a running container:
+  - Docker **copies** the file into the container’s writeable layer first.
+  - Then you modify the copied file.
+- This mechanism is called **Copy-on-Write**.
+- The original image layers **stay unchanged**.
+#### Docker Volumes (Persistent Storage)
+- By default, container data is **lost** when container is deleted.
+- To **persist** data → use **Volumes**.
+- **Types of Mounts:**
+  1. **Volume Mount:**
+      - Docker-created volume stored under `/var/lib/docker/volumes/`.
+      - **Command Example:** `-v data_volume:/var/lib/mysql`
+  2. **Bind Mount:**
+      - Use an existing folder from the host (e.g., `/data/mysql`) and mount into container.
+      - **Command Example:** `--mount type=bind,source=/data/mysql,target=/var/lib/mysql`
+- **Creating and Using Volumes:**
+  - Create volume:
+    ```bash
+    docker volume create data_volume
+    ```
+  - Use volume during container run:
+    ```bash
+    docker run -v data_volume:/var/lib/mysql mysql
+    ```
+  - Docker **auto-creates** a volume if it doesn't exist when you run `docker run -v`.
+- **Bind Mount Example:**
+  - Using an existing host path:
+    ```bash
+    docker run -v /data/mysql:/var/lib/mysql mysql
+    ```
+- **Old vs New Mount Syntax:**
+  - **Old way**: `-v`
+  - **New recommended way**: `--mount`
+    ```bash
+    docker run --mount type=bind,source=/data/mysql,target=/var/lib/mysql mysql
+    ```
+#### Docker Storage Drivers
+- **Storage Drivers** manage:
+  - Layered architecture
+  - Writable layers
+  - Copy-on-write functionality
+- **Common Storage Drivers**:
+  - AUFS
+  - Overlay, Overlay2
+  - Device Mapper
+  - Btrfs
+  - ZFS
+- **Driver Selection**:
+  - Storage driver selection depends on the OS.
+  - **Ubuntu** → AUFS (default)
+  - **Fedora/CentOS** → Device Mapper or Overlay2
+- Docker **automatically picks** the best driver based on OS.
+### Docker Volume Drivers
+- **Storage Drivers** → Manage storage for **images** and **containers**.
+- **Volumes** → Used to **persist data** even if the container is deleted.
+- **Important Points About Volumes:**
+  - **`Volumes are NOT managed by storage drivers`**.
+  - **`Volumes are handled by Volume Driver Plugins`**.
+#### Default Volume Driver Plugin (`local`)
+- **Volume drivers** are responsible for creating and managing volumes.
+- The **default volume driver** = **`local`**.
+  - It stores volumes on the **Docker host** at:
+    ```
+    /var/lib/docker/volumes/
+    ```
+#### Other Volume Driver Plugins (Third-party plugins)
+- You can use **different plugins** to create volumes on external storage services:
+  - **Azure File Storage**
+  - **DigitalOcean Block Storage**
+  - **Portworx**
+  - **Google Compute Engine Persistent Disks**
+  - **AWS EBS** (Elastic Block Store) — using `rexray/ebs` plugin
+#### Using a Custom Volume Driver
+- When you run a **Docker container**, you can choose a specific **volume driver**:
+  ```bash
+  docker run -it --name mysql \
+      --volume-driver rexray/ebs \
+      --mount src=ebs-vol,target=/var/lib/mysql \
+      mysql
+  ```
+  - `--volume-driver` = select the plugin (`rexray/ebs` here).
+  - `--mount src=volume-name,target=path-in-container` = mount the volume.
+- **Result:**
+  - A volume from AWS EBS is attached to the container.
+  - Even if the container stops, data is safely stored in the AWS cloud!.
+
+## Container Storage Interface (CSI)
+- [Refer Here](https://kubernetes.io/blog/2019/01/15/container-storage-interface-ga/) for the Official docs.
+- **Container Storage Interface (CSI)** is a **standard** for integrating **storage solutions** with **Kubernetes** (and other orchestration tools).
+- It allows Kubernetes to work with different **storage vendors** by using common drivers.
+- **Before CSI**: Kubernetes only worked with certain storage solutions and adding new ones required changes to Kubernetes.
+- **CSI** enables storage vendors to create their own **storage plugins** that integrate seamlessly with Kubernetes.
+- **CSI is not just for Kubernetes**; it works with other orchestration tools like **Mesos** and **Cloud Foundry**.
+### Working of CSI
+- Kubernetes or other orchestrators communicate with **storage drivers** using **Remote Procedure Calls (RPCs)**:
+  - Examples of RPCs:
+    - `CreateVolume` (to create a new volume)
+    - `DeleteVolume` (to delete a volume)
+- **Storage vendors** implement these RPCs in their CSI drivers.
+### CSI vs Other Interfaces
+- **Container Runtime Interface (CRI)**: Defines how Kubernetes interacts with **container runtimes** like Docker.
+- **Container Networking Interface (CNI)**: Defines how Kubernetes interacts with **networking solutions**.
+- **CSI**: CSI provides a standard for **storage**, similar to how CRI and CNI work for runtimes and networking.
+### Key Points
+- CSI allows Kubernetes to integrate with various storage solutions using a **standardized plugin system**.
+- It uses **RPC calls** to manage volumes, such as creating and deleting volumes.
+- **Supported by Kubernetes**, **Cloud Foundry**, **Mesos**, and other orchestration tools.
+
+## Volumes in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/concepts/storage/volumes/) for the Official docs.
+- **Volumes** in Kubernetes are used to persist data generated by **containers** inside **pods**. 
+- Without volumes, any data generated inside a container will be lost when the container is deleted or restarted.
+- Volumes help you **retain data** even if the pod is deleted, as the data is stored outside of the container.
+### Need of Volumes
+- In Docker, when a container is deleted, all data is lost unless it is attached to a volume.
+- Similarly, in Kubernetes, **pods** are **transient** (temporary), meaning the data inside the pod is lost when the pod is deleted.
+- To solve this, you can create **volumes** to persist data on the **host machine** or on cloud-based storage.
+### Example of Using Volumes
+- Pod YAML Configuration:
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: random-number-generator
+  spec:
+    containers:
+    - image: alpine
+      name: alpine
+      command: ["/bin/sh","-c"]
+      args: ["shuf-i 0-100 -n 1 >> /opt/number.out;"]
+      volumeMounts:
+      - mountPath: /opt
+        name: data-volume
+    volumes:
+    - name: data-volume
+      hostPath:
+        path: /data
+        type: Directory
+  ```
+- Let's say we have a pod that generates a random number and writes it to a file:
+  - The pod writes the number to `/opt/number.out` inside the container.
+  - We create a volume and mount it at `/opt` inside the container, which is mapped to a directory `/data` on the host.
+  - **Even if the pod is deleted**, the data persists because it is stored in the volume, which is mapped to the host's `/data` directory.
+### Volume Storage Options
+- Kubernetes supports multiple **storage solutions**:
+  - **HostPath** (local node storage): Good for single-node clusters, but not recommended for multi-node clusters.
+  - **NFS**, **GlusterFS**, **CephFS**: Networked storage solutions.
+  - **Cloud-based storage**: AWS EBS, Azure Disk, Google Persistent Disk.
+- **Example:** AWS EBS Volume Configuration
+  - You can use cloud storage like **AWS EBS** in your Kubernetes volumes:
+    ```yaml
+    volumes:
+    - name: data-volume
+      awsElasticBlockStore:
+        volumeID: <volume-id>
+        fsType: ext4
+    ```
+
+## Persistent Volumes (PV) in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/concepts/storage/persistent-volumes/) for the Official docs.
+- **Persistent Volumes (PV)** provide a **centralized storage pool** in a Kubernetes cluster.
+- **Administrators** configure the persistent volumes, and users can **claim** pieces of this storage as needed.
+- **Persistent Volumes** make storage management easier, especially in large environments with many users and pods.
+- In Kubernetes, when you configure **volumes** in a pod definition, **storage is specified per pod**.
+- If there are many pods, users must configure storage individually for each pod.
+- This can be inefficient and error-prone.
+- **Persistent Volumes** allow for centralized storage management, where users can simply claim storage from a pre-configured pool.
+### Create a Persistent Volume
+- **Steps:**
+  1. **Define PV**:
+     - Use the **PersistentVolume** API object.
+     - Set the **API version** and the **kind** to `PersistentVolume`.
+     - Give it a **name** (e.g., `PV-Vol1`).
+  2. **Specify Storage Options**:
+     - **Access Modes**:
+       - **ReadOnlyMany**: Multiple pods can read, but not write.
+       - **ReadWriteOnce**: One pod can read and write.
+       - **ReadWriteMany**: Multiple pods can read and write.
+     - **Capacity**: Define the storage size (e.g., `1Gi` for 1 GB).
+     - **Volume Type**: Initially, use `hostPath` (for local node storage), but it's not recommended for production.
+- **YAML Configuration:**
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+    - Select required API, in this case `PersistentVolume`.
+  - [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#persistentvolume-v1-core) for the **PersistentVolume Cluster APIs**.
+    - Based on **PersistentVolume Cluster APIs** write YAML file:
+      ```yaml
+      apiVersion: v1
+      kind: PersistentVolume
+      metadata:
+        name: pv-vol1
+      spec:
+        accessModes: ["ReadWriteOnce"]  # The access mode (can be RWO, ROX, or RWX)
+        capacity:
+          storage: 1Gi        # Volume size
+        hostPath:
+          path: /tmp/data     # Path to storage on the host machine
+      ```
+  - **Note:**
+    - For local testing, configure a `hostPath` storage on the node (e.g., `/tmp/data`).
+    - Do not use `hostPath` in **production environments** because it is node-specific.
+  - **Commands:**
+    ```bash
+    kubectl create -f persistentvolume.yaml
+    # Create the persistent volume
+    kubectl get persistentvolume
+    # List persistent volumes
+    kubectl delete pv <name>
+    # Delete the persistent volume
+    ```
+
+## Persistent Volume Claims (PVCs)
+- [Refer Here](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#lifecycle-of-a-volume-and-claim) for the Official docs.
+- **Persistent Volume Claims (PVCs)** are requests for **storage resources** in Kubernetes.
+- A **PVC** allows users to **claim storage** from the **Persistent Volume (PV)** pool that has been pre-configured by the administrator.
+- PVCs are **separate objects** from PVs, but Kubernetes automatically binds a PVC to an appropriate PV based on the requested properties like **storage size** and **access modes**.
+### Working of PVCs
+1. **Create a Persistent Volume (PV)**:
+   - An administrator creates a Persistent Volume that defines the storage properties (size, access mode, etc.).
+2. **Create a Persistent Volume Claim (PVC)**:
+   - A user creates a PVC specifying the **storage size** and **access mode**.
+   - Kubernetes then tries to **match** the PVC to an available PV that meets the requested criteria.
+3. **Binding**:
+   - If a **matching PV** is found, Kubernetes automatically binds the PVC to the PV, and the PVC will show a `Bound` status.
+   - If no matching PV is found, the PVC will stay in a `Pending` state.
+### PVC YAML Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `PersistentVolumeClaim`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#persistentvolumeclaim-v1-core) for the **PersistentVolumeClaim Config and Storage APIs**.
+  - Based on **PersistentVolumeClaim Config and Storage APIs** write YAML file:
+    ```yaml
+    kind: PersistentVolumeClaim
+    apiVersion: v1
+    metadata:
+      name: myclaim
+    spec:
+      accessModes: [ "ReadWriteOnce" ]  # Define access mode (ReadWriteOnce, ReadOnlyMany, ReadWriteMany)
+      resources:
+        requests:
+          storage: 1Gi  # Specify the storage request (1Gi in this case)
+    ```
+- **Commands:**
+  ```bash
+  kubectl create -f persistentvolumeclaim.yaml
+  # Create the persistent volume claim
+  kubectl get pvc
+  # List all persistent volume claims
+  kubectl delete pvc <pvc-name>
+  # Delete the persistent volume claim
+  ```
+- **Note:**
+  - The PVC might initially be in **pending** state until a PV that matches is available.
+  - Once the PVC is bound to a suitable **PV**, it will show in the **bound** state.
+### When a PVC is Deleted
+- When a **PVC** is deleted, you can control what happens to the associated **PV** using **ReclaimPolicy**.
+- The **ReclaimPolicy** is set in the **Persistent Volume (PV)** definition under the **spec** section.
+  - **Retain (default)**: The PV remains, but is no longer available for other claims. It must be manually deleted.
+  - **Delete**: The PV is deleted automatically when the PVC is deleted.
+  - **Recycle**: The PV is scrubbed and made available for reuse by other PVCs.
+### Using PVCs in Pods
+- After creating a **PVC**, you can use it in a pod by specifying the **PVC name** in the pod's definition.
+- **Pod YAML Configuration:**
+  ```yaml
+  apiVersion: v1
+  kind: Pod
+  metadata:
+    name: mypod
+  spec:
+    containers:
+      - name: myfrontend
+        image: nginx
+        volumeMounts:
+        - mountPath: "/var/www/html"
+          name: mypd
+    volumes:
+      - name: mypd
+        persistentVolumeClaim:
+          claimName: myclaim
+  ```
+- The **volumeMounts** section specifies where the volume will be mounted in the container, and the **volumes** section specifies the PVC name.
+- To use PVC in **Deployments** or **ReplicaSets**, add the PVC configuration under the **volumes** section in the pod template.
+
+## Storage Classes in Kubernete
+- [Refer Here](https://kubernetes.io/docs/concepts/storage/storage-classes/) for the Official docs.
+- Earlier, we **manually created** Persistent Volumes (PVs) before using them in Pods.
+- For example, in **cloud environments** (AWS, GCP, Azure), you had to **manually create disks** before using them — this is called **Static Provisioning**.
+### Static Provisioning
+- **Admin manually creates** Persistent Volumes (PVs) ahead of time.
+- Pods use these pre-created PVs by creating Persistent Volume Claims (PVCs).
+- **Problem:** Manual work every time you need storage!
+### Dynamic Provisioning (Using Storage Classes)
+- With **Storage Classes (SC), PVs are created automatically** when a PVC is created.
+- **No need to manually create disks** or volumes anymore.
+- This is called **Dynamic Provisioning.**
+- Kubernetes automatically provisions and attaches the storage when a PVC requests it.
+#### Working of Storage Class
+- **StorageClass** defines **how to provision** a storage volume dynamically (e.g., which cloud provider and storage type to use).
+- When a PVC requests storage and specifies a StorageClass, Kubernetes **automatically provisions** a new PV according to the StorageClass.
+#### Dynamic Provisioning Flow
+- Create a **StorageClass** object.
+- Mention the **provisioner** (like Google Cloud Disk, AWS EBS, Azure Disk, etc.).
+- PVC requests storage and **mentions the StorageClass** name.
+- Kubernetes uses the StorageClass to:
+  - Create a **new disk** (e.g., on GCP, AWS).
+  - Create a **PV** automatically.
+  - **Bind** the new PV to the PVC.
+- PVs are still created, but **automatically** (you don’t need to write PV YAML manually).
+#### Create a StorageClass
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `StorageClass`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#storageclass-v1-storage-k8s-io) for the **StorageClass Config and Storage APIs**.
+  - Based on **StorageClass Config and Storage APIs** write YAML file:
+    ```yaml
+    apiVersion: storage.k8s.io/v1
+    kind: StorageClass
+    metadata:
+      name: fast-storage
+    provisioner: kubernetes.io/gce-pd  # Example: GCP Persistent Disk
+    parameters:
+      type: pd-ssd                     # Example: SSD disk type
+      replication-type: none           # Optional extra settings
+    volumeBindingMode: WaitForFirstConsumer
+    ```
+  - **Note:**
+    - **`provisioner`** defines which cloud or storage system is used.
+    - **`parameters`** can customize disk type, replication, etc.
+  - **Commands:**
+    ```bash
+    kubectl create -f sc-definition.yaml
+    # Create the storage class
+    kubectl get sc
+    # List the storage classes
+    ```
+#### Use a StorageClass in PVC
+- Based on **PersistentVolumeClaim Config and Storage APIs**, write the PVC YAML File:
+  ```yaml
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: myclaim
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 1Gi
+    storageClassName: fast-storage   # Reference the storage class
+  ```
+- The PVC specifies `storageClassName` to tell Kubernetes which storage class to use.
+- Kubernetes dynamically provisions a new PV based on the Storage Class.
+#### Examples of Provisioners
+- Google Cloud: **`kubernetes.io/gce-pd`**
+- AWS: **`kubernetes.io/aws-ebs`**
+- Azure Disk: **`kubernetes.io/azure-disk`**
+- CephFS, Portworx, ScaleIO, etc.
+#### Important StorageClass Concepts
+- **StorageClass Fields:**
+  - **`provisioner`**
+    - Name of the CSI/in-tree plugin
+    - e.g., `ebs.csi.aws.com`, `kubernetes.io/gce-pd`
+  - **`reclaimPolicy`**
+    - What to do with PV after PVC is deleted
+    - `Retain` / `Delete` (default: Delete)
+  - **`volumeBindingMode`**
+    - When the volume is bound to the PVC
+    - `Immediate` or `WaitForFirstConsumer`
+  - **`allowVolumeExpansion`**
+    - Allows resizing PVCs
+    - true / false
+- **Volume Binding Modes:**
+  - **`Immediate`**
+    - PV is created **as soon as** PVC is created
+    - Default; works for most cases
+  - **`WaitForFirstConsumer`**
+    - PV is created **only when Pod is scheduled**
+    - Needed when topology matters (e.g., AWS/AZ zones)
+    > In AWS with EBS or GCP disks, use `WaitForFirstConsumer` to ensure volume is created in the same AZ as the node.
