@@ -1,4 +1,4 @@
-# <p align="center">Kubernetes for Certified Kubernetes Administrator (CKA)</p>
+# <p align="center">Certified Kubernetes Administrator (CKA)</p>
 
 
 # <p align="center">Core Concepts</p>
@@ -3017,9 +3017,9 @@
   - Everything in Kubernetes goes through the **API Server**.
   - So, it must be **well protected**.
 - In Kubernetes, security decisions are made on **two levels**:
-  1. **Who can access?** → *Authentication*
-  2. **What can they do?** → *Authorization*
-#### 1. **Authentication:**
+  1. **Who can access?** → **`Authentication`**
+  2. **What can they do?** → **`Authorization`**
+#### Authentication
 - Who can access the API Server is defined by the Authentication mechanisms.
 - Methods:
   - Static password/token files
@@ -3027,7 +3027,7 @@
   - External providers (e.g., **LDAP**)
   - **ServiceAccounts** (for machines/apps)
 - Controls **access to the cluster**
-#### 2. **Authorization:**
+#### Authorization
 - Once they gain access to the cluster, what they can do is defined by authorization mechanisms.
 - Methods:
   - **RBAC (Role-Based Access Control)** ← most commonly used
@@ -3258,7 +3258,7 @@
   - Private key
   - CSR
   - Signed cert
-##### No Need to Provide **Admin Privileges** to All Client Certs
+##### No Need to Provide `Admin Privileges` to All Client Certs
 - You **do NOT** give admin privileges to every component.
 - **Admin Privileges (e.g., `O=system:masters`)**
   - Only needed for **actual users** (like `kube-admin`) who will perform admin tasks using `kubectl`.
@@ -4892,3 +4892,1306 @@ spec:
     - PV is created **only when Pod is scheduled**
     - Needed when topology matters (e.g., AWS/AZ zones)
     > In AWS with EBS or GCP disks, use `WaitForFirstConsumer` to ensure volume is created in the same AZ as the node.
+
+
+# <p align="center">Networking</p>
+
+## Prerequisites - Basic Networking Concepts
+### Switching and Routing
+#### Network
+- A **network connects systems** (like laptops, VMs, containers) so they can talk to each other.
+- Two systems (A & B) are connected using a **switch**.
+- Each system needs a **network interface** (e.g., `eth0`).
+  ```bash
+  ip link
+  # Shows network interfaces
+  ip addr add 192.168.1.10/24 dev eth0
+  # Assign IP to an interface
+  ```
+#### Switches
+- Used to connect **systems within the same network**.
+- Example: Systems A (`192.168.1.10`) and B (`192.168.1.11`) can talk via switch if on the same subnet (e.g., `192.168.1.0/24`).
+  ![preview](./Images/Kubernetes_CKA41.png)
+#### Routing & Routers
+- A **router connects two or more networks**.
+- Has **multiple interfaces**, each with an IP from different subnets.
+- Example:
+  - Network-1: `192.168.1.0`
+  - Network-2: `192.168.2.0`
+  - Router gets IPs: `192.168.1.1` and `192.168.2.1`
+  ![preview](./Images/Kubernetes_CKA42.png)
+#### Gateway Concept
+- A **gateway** is like a door to another network (including internet).
+- Without it, systems can't reach outside networks.
+  ```bash
+  ip route
+  # View routing table
+  ip route add 192.168.2.0/24 via 192.168.1.1
+  # Add route to another network
+  ```
+- Default route (used to reach internet or unknown networks):
+  ```bash
+  ip route add default via 192.168.1.1
+  # or via 0.0.0.0
+  ```
+  ![preview](./Images/Kubernetes_CKA43.png)
+#### Internet Access
+- Set router’s IP as **default gateway**.
+- This avoids adding routes for every external network manually.
+#### Routing Table
+- Stores **rules for where to send packets**.
+- Issues reaching external networks are often due to **missing or incorrect default gateway**.
+- Key tool: `route` or `ip route`
+#### Setting Up a Linux Host as Router
+- **Step:1 `Assign IP addresses to all hosts`**
+  - On `Host-A`:
+    ```bash
+    ip addr add 192.168.1.5/24 dev eth0
+    ip link set eth0 up
+    ```
+  - On `Host-B` (router):
+    ```bash
+    ip addr add 192.168.1.6/24 dev eth0
+    ip addr add 192.168.2.6/24 dev eth1
+    ip link set eth0 up
+    ip link set eth1 up
+    ```
+  - On `Host-C`:
+    ```bash
+    ip addr add 192.168.2.5/24 dev eth0
+    ip link set eth0 up
+    ```
+- **Step:2 `Add static routes on Hosts A and C`**
+  - On `Host-A` (to reach `C` via `B`):
+    ```bash
+    ip route add 192.168.2.0/24 via 192.168.1.6
+    ```
+  - On `Host-C` (to reach `A` via `B`):
+    ```bash
+    ip route add 192.168.1.0/24 via 192.168.2.6
+    ```
+- **Step:3 `Enable IP forwarding on Host B (the router)`**
+  - Temporary (until reboot):
+    ```bash
+    echo 1 > /proc/sys/net/ipv4/ip_forward
+    ```
+  - Permanent (survives reboot):
+    - Edit `/etc/sysctl.conf` and set:
+      ```ini
+      net.ipv4.ip_forward = 1
+      ```
+    - Then apply:
+      ```bash
+      sysctl -p
+      ```
+- **Step:4 `Test the connectivity`**
+  - From **Host-A**, ping `Host-C`:
+    ```bash
+    ping 192.168.2.5
+    ```
+  - From **Host-C**, ping `Host-A`:
+    ```bash
+    ping 192.168.1.5
+    ```
+  - If all configurations are correct and IP forwarding is enabled, pings should succeed.
+  ![preview](./Images/Kubernetes_CKA44.png)
+#### Key Commands
+- `ip link` → Show network interfaces
+- `ip addr` → Show IP addresses along with network interfaces
+- `ip addr show <network-interfaces-name>` → Show information about the network interface
+- `ip addr show type <interface-type-name>` → Show particular type of interfaces only
+- `ip addr add <IP>/<mask> dev <interface>` → Assign IP address
+  - Example: `ip addr add 192.168.1.10/24 dev eth0`
+- `ip route` → Show routing table
+- `ip route add <net> via <gateway>` → Add a static route
+  - Example: `ip route add 192.168.2.0/24 via 192.168.1.1`
+- `ip route add default via 192.168.1.1` → Add default gateway
+- `cat /proc/sys/net/ipv4/ip_forward` → Check if IP forwarding is enabled
+- `echo 1 > /proc/sys/net/ipv4/ip_forward` → Enable IP forwarding (temporary)
+### DNS
+- DNS (Domain Name System) helps convert **hostnames (like `db` or `google.com`) into IP addresses**.
+- This is called **Name Resolution**.
+#### Local Name Resolution Using `/etc/hosts`
+- You can manually assign hostnames to IPs in each host’s `/etc/hosts` file.
+- Format:
+  ```
+  192.168.1.11  db
+  ```
+- Now, you can use `ping db` instead of the IP.
+- `/etc/hosts` is only valid **for the local system**.
+- You can trick the system with false mappings (e.g., map system B to `www.google.com`).
+  ![preview](./Images/Kubernetes_CKA45.png)
+#### System Resolve Hostnames
+- First, system checks `/etc/hosts`
+- If not found, checks DNS servers configured in `/etc/resolv.conf`
+- This order is defined in `/etc/nsswitch.conf` under the `hosts:` entry:
+  ```
+  hosts: files dns
+  ```
+#### Centralized Name Resolution with DNS Server
+- When managing many systems, use a **central DNS server** instead of editing each `/etc/hosts`.
+- Configure DNS server IP in each host’s `/etc/resolv.conf`:
+  ```
+  nameserver 192.168.1.100
+  ```
+#### Handling Conflicts
+- If a hostname is found **in both** `/etc/hosts` and DNS:
+  - The system uses **`/etc/hosts` first** (as per `nsswitch.conf`).
+- You can **change this lookup order** in `nsswitch.conf`.
+#### Public DNS Example
+- `8.8.8.8` is Google’s **public DNS**.
+- Add it in `/etc/resolv.conf` to resolve public domains like `facebook.com`.
+- **Resolve Public Domains:**
+  - Error like this:
+    ```pgsql
+    ping www.github.com
+    ping: www.github.com: Temporary failure in name resolution
+    ```
+  - Fix: Add a public DNS to `/etc/resolv.conf`:
+    ```bash
+    nameserver 8.8.8.8
+    ```
+  - Retry:
+    ```bash
+    ping www.github.com
+    ```
+#### Domain Names & Subdomains
+- Domain structure: `mail.google.com`
+  - `.com` → Top Level Domain (TLD)
+  - `google` → Second Level Domain
+  - `mail` → Subdomain
+- Other TLDs: `.net`, `.org`, `.edu`, etc.
+#### Internal DNS and Search Domains
+- Inside a company, domains might be like `web.mycompany.com`.
+- If you want to use just `web` internally, use the `search` directive in `/etc/resolv.conf`:
+  ```bash
+  search mycompany.com
+  ```
+- Now `ping web` becomes `ping web.mycompany.com`.
+#### Record Types
+- **`A`** → Maps domain to IPv4 address
+- **`AAAA`** → Maps domain to IPv6 address
+- **`CNAME`** → Alias of another domain
+- **`MX`** → Mail server info
+- **`NS`** → Name server
+#### DNS Testing Tools
+- **`nslookup:`**
+  - Simple DNS query tool:
+    ```bash
+    nslookup www.google.com
+    ```
+- **`dig:`**
+  - Detailed DNS query info:
+    ```bash
+    dig www.google.com
+    ```
+    Shows:
+    - Question and Answer sections
+    - IP address
+    - DNS server used
+    - Query time
+### CoreDNS
+- CoreDNS is a **DNS server** used in Kubernetes to resolve **service names to IPs**.
+- It is a **plugin-based DNS server** and runs as a **Kubernetes add-on**.
+- It listens on **port 53 (default DNS port)**.
+#### Install CoreDNS (Outside Kubernetes)
+1. Download the Binary & Extract:
+     - [Refer Here](https://github.com/coredns/coredns/releases) for the Official site.
+       ```bash
+       wget https://github.com/coredns/coredns/releases/download/<version>/coredns_<version>_linux_amd64.tgz
+       tar -xvzf coredns_<version>_linux_amd64.tgz
+       ```
+2. Run the CoreDNS binary:
+   ```bash
+   ./coredns
+   ```
+#### Configure CoreDNS
+1. **Add DNS entries** to the `/etc/hosts` file on the CoreDNS server:
+   ```
+   10.10.10.1   web.mycompany.com
+   10.10.10.2   db.mycompany.com
+   ```
+2. **Create a Corefile** for CoreDNS configuration:
+    - Create a basic `Corefile`
+      ```text
+      . {
+        hosts /etc/hosts
+        forward . 8.8.8.8
+        log
+      }
+      ```
+      - This tells CoreDNS to use `/etc/hosts` for DNS mappings.
+      - `forward . 8.8.8.8`: forward unknown requests to Google DNS.
+      - `log`: log DNS queries.
+3. Run CoreDNS with this Corefile:
+    - By default, CoreDNS looks for a file named `Corefile` in the **current working directory**.
+      ```bash
+      ./coredns
+      ```
+#### CoreDNS in Kubernetes
+- In real Kubernetes clusters:
+  - CoreDNS runs as a **Deployment** in the `kube-system` namespace.
+  - It uses the **`kubernetes` plugin** in Corefile to resolve names like:
+    ```
+    <service>.<namespace>.svc.cluster.local
+    ```
+- This plugin dynamically maps Kubernetes service/pod names to IPs.
+### Network Namespace
+- A **network namespace** provides **isolated network resources** (like interfaces, routing tables, firewall rules).
+- Each **container/pod** gets its own **network namespace**.
+- **Isolation:** Containers in different namespaces can't see each other's interfaces or IPs unless connected.
+- Each namespace gets its own:
+  - Network interfaces
+  - Routing tables
+  - ARP tables
+#### Viewing Processes and Routes
+- On `Host` and `Container`:
+  - `ps aux` → Shows all running processes
+  - `route` → Displays the kernel IP routing table
+  - `arp` → Shows address resolution protocol table (Shows the IP-to-MAC address mappings)
+#### Creating Network Namespaces
+- Create two isolated network environments:
+  ```bash
+  ip netns add red
+  ip netns add blue
+  ```
+- **List namespaces:**
+  ```bash
+  ip netns
+  ```
+- **Executing Inside a Namespace:**
+  - Full Form:
+    ```bash
+    ip netns exec red ip link
+    ```
+  - Short Form:
+    ```bash
+    ip -n red link
+    ```
+- **ARP and Routing Table Inside Namespace:**
+  ```bash
+  ip netns exec red arp
+  ip netns exec red route
+  ```
+#### Virtual Ethernet (`veth`) Pair (`Virtual Cable`)
+- Think of a veth pair as a **virtual wire**:
+  - One end inside one namespace.
+  - Other end inside another namespace.
+- **Steps:**
+  - Create a virtual connection:
+    ```bash
+    ip link add veth-red type veth peer name veth-blue
+    ```
+  - Attach each end to a namespace:
+    ```bash
+    ip link set veth-red netns red
+    ip link set veth-blue netns blue
+    ```
+  - Assign IPs:
+    ```bash
+    ip -n red addr add 192.168.15.1/24 dev veth-red
+    ip -n blue addr add 192.168.15.2/24 dev veth-blue
+    ```
+  - Bring interfaces up:
+    ```bash
+    ip -n red link set veth-red up
+    ip -n blue link set veth-blue up
+    ```
+  - Test connectivity:
+    ```bash
+    ip netns exec red ping 192.168.15.2
+    ```
+  - View ARP tables:
+    ```bash
+    ip netns exec red arp
+    ip netns exec blue arp
+    ```
+  - Delete link:
+    ```bash
+    ip -n red link del veth-red
+    ```
+#### Linux Bridge – For Shared Communication
+1. **Create namespaces again:**
+    ```bash
+    ip netns add red
+    ip netns add blue
+    ```
+2. **Create a bridge on the host:**
+    ```bash
+    ip link add v-net-0 type bridge
+    ip link set dev v-net-0 up
+    ```
+3. **Create veth pairs to connect to the bridge:**
+    ```bash
+    ip link add veth-red type veth peer name veth-red-br
+    ip link add veth-blue type veth peer name veth-blue-br
+    ```
+4. **Assign interfaces:**
+    ```bash
+    ip link set veth-red netns red
+    ip link set veth-blue netns blue
+    ip link set veth-red-br master v-net-0
+    ip link set veth-blue-br master v-net-0
+    ```
+5. **Assign IP addresses:**
+    ```bash
+    ip -n red addr add 192.168.15.1/24 dev veth-red
+    ip -n blue addr add 192.168.15.2/24 dev veth-blue
+    ip addr add 192.168.15.5/24 dev v-net-0
+    ```
+6. **Bring interfaces up:**
+    ```bash
+    ip -n red link set veth-red up
+    ip -n blue link set veth-blue up
+    ip link set dev veth-red-br up
+    ip link set dev veth-blue-br up
+    ```
+7. **Enable routing from namespace to host/external:**
+    ```bash
+    ip netns exec blue ip route add 192.168.1.0/24 via 192.168.15.5
+    ```
+8. **Enable NAT for internet access:**
+    ```bash
+    iptables -t nat -A POSTROUTING -s 192.168.15.0/24 -j MASQUERADE
+    ```
+9. **Set default route and test external connectivity:**
+    ```bash
+    ip netns exec blue ip route add default via 192.168.15.5
+    ip netns exec blue ping 8.8.8.8
+    ```
+#### Port Forwarding Example
+- This command sets up **Destination NAT (DNAT)** so that traffic to port `80` on the host is **redirected** to another IP address and port — in this case, `192.168.15.2:80`.
+  ```bash
+  iptables -t nat -A PREROUTING --dport 80 --to-destination 192.168.15.2:80 -j DNAT
+  ```
+- This command **lists** the current rules in the **NAT table** in a **verbose** and **numeric** format.
+  ```bash
+  iptables -nvL -t nat
+  ```
+
+## Prerequisites - Docker Networking
+### Docker Networking Modes
+- **`none`** → No network. Container is isolated. Cannot access or be accessed.
+- **`host`** → Shares host’s network. No isolation. Exposes container ports directly on host. No port mapping needed.
+- **`bridge`** → Default mode. Creates a private internal network (e.g., 172.17.0.0/16). Containers communicate via a virtual bridge (`docker0`). Port mapping needed for external access.
+### Bridge Network Internals
+- When Docker is installed, it creates:
+  - A **bridge network** visible in `docker network ls` (name: `bridge`).
+  - A **bridge interface** on host called `docker0` (see `ip link`).
+  - `docker0` is assigned IP (e.g., `172.17.0.1`).
+- **Bridge acts like**:
+  - A **switch** for containers.
+  - An **interface** for the host.
+### Container Network Namespace
+- Each container has its **own network namespace**.
+- You can inspect them using:
+  ```bash
+  docker inspect <container>
+  ```
+- Or use `ip netns`, but Docker namespaces may require a workaround to list.
+### veth Pairs (Virtual Ethernet Interfaces)
+- Docker creates a **veth pair**:
+  - One end in container’s namespace.
+  - Other end attached to `docker0` bridge on the host.
+- IP assigned (e.g., `172.17.0.3`) to the container’s interface.
+- Use `ip link` and `ip -n <namespace> link` to view.
+### Container-to-Host & Inter-Container Communication
+- All containers on the bridge network can **talk to each other**.
+- Host can talk to containers using container IPs.
+- External systems **cannot** access container IPs directly.
+### Port Mapping (Publishing)
+- To expose container ports outside:
+  ```bash
+  docker run -p 8080:80 nginx
+  ```
+  - Maps host port `8080` → container port `80`.
+- Access web app via:
+  ```bash
+  curl http://<docker-host-ip>:8080
+  ```
+### Docker Maps Ports Internally
+- Docker uses **iptables NAT rules**:
+  - PREROUTING rule redirects traffic from port `8080` → container’s `80`.
+  - Rule looks like:
+    ```bash
+    iptables -t nat -L -n
+    ```
+    → See `DOCKER` chain with redirection rules.
+
+## Prerequisites - Container Networking Interface (CNI)
+- **CNI (Container Network Interface)** is a **specification** that defines how **network connectivity** should be set up for containers.
+- Kubernetes **uses CNI plugins** to configure networking between pods.
+### Working of CNI
+1. **Responsibilities of Container Runtimes (e.g., Kubernetes)**
+    - Create **network namespace** for each container.
+    - Identify which **network plugin** to use.
+    - Call the plugin with:
+      - `ADD` (on container creation)
+      - `DEL` (on container deletion)
+    - Pass config via a **JSON file**.
+2. **Responsibilities of CNI Plugins**
+    - Accept commands: `ADD`, `DEL`, `CHECK`.
+    - Assign **IP addresses**.
+    - Configure **routes and connectivity**.
+    - Return result in **standard format**.
+### Examples of CNI Plugins
+- **Official (built-in) plugins:**
+  - `bridge`, `host-local`, `macvlan`, `ipvlan`, `dhcp`, `loopback`
+- **Third-party plugins:**
+  - **Calico** → Network policies + IP routing
+  - **Flannel** → Simple overlay networks
+  - **Weave** → Encryption + simplicity
+  - **Cilium** → High-performance eBPF-based
+  - **VMware NSX**, **Infoblox**, and more
+- **CNI Plugin Files Location:**
+  - **`ls /opt/cni/bin/`** → Shows installed CNI plugins like `bridge`, `flannel`, `host-local`, etc.
+### Docker
+- Docker does **not use CNI**.
+- Docker uses **CNM (Container Network Model)**, a different standard.
+- So CNI plugins **don’t work directly with Docker**.
+- But:
+  - Kubernetes uses Docker **without Docker’s networking**.
+  - Kubernetes starts Docker containers on a **null network**, and applies **CNI plugins manually.**
+
+## Cluster Networking
+- [Refer Here](https://kubernetes.io/docs/concepts/cluster-administration/networking/) for the Official docs.
+- Each **Kubernetes node** (master or worker) must have:
+  - At least **one network interface**
+  - A valid **IP address**
+  - A **unique hostname**
+  - A **unique MAC address**
+  > **Important**: If you **clone VMs**, make sure to change the hostname and MAC address — duplicates cause problems.
+### Required Ports to Open
+- [Refer Here](https://kubernetes.io/docs/reference/networking/ports-and-protocols/) for the Official docs.
+- **On Master Node:**
+  - `6443` → **kube-apiserver** - Main API entrypoint for all clients
+  - `10250` → **kubelet** - Kubelet communication (also on workers)
+  - `10257` → **kube-controller-manager** - Controller manager access
+  - `10259` → **kube-scheduler** - Scheduler access
+  - `2379` → **etcd** - Etcd server (main key-value store)
+  - `2380` → **etcd (multi-master)** - Etcd peer-to-peer communication
+- **On Worker Nodes:**
+  - `10250` → **kubelet** - Kubelet API
+  - `30000–32767` → NodePort Services - Exposes services to external users
+  > **Note**: These ports must be **open in firewalls**, **iptables**, or **cloud security groups** (AWS, GCP, Azure, etc.).
+### Tools & Checks for Networking
+- Use these commands to **inspect node networking**:
+  ```bash
+  ip addr
+  # View IPs and interfaces
+  ip route
+  # View routing info
+  hostname
+  # View host name
+  ss -tuln   (or)   netstat -nltp
+  # View listening ports
+  sudo iptables -L -n
+  # View firewall rules
+  ```
+- Set a Unique Hostname:
+  ```bash
+  hostnamectl set-hostname <new-hostname>
+  exec bash   # Reload shell
+  ```
+
+## Pod Networking in Kubernetes
+- Kubernetes nodes can already talk to each other (e.g., using 192.168.1.x).
+- Kubernetes also needs:
+  - Pods on the same node to reach each other.
+  - Pods on **different nodes** to communicate directly via IP.
+  - **No NAT** between pods — flat, routable network.
+- **Pod Network Requirements:**
+  1. Every **pod gets a unique IP**.
+  2. Pods on the **same node** can reach each other directly.
+  3. Pods on **different nodes** can reach each other directly.
+  4. No NAT required between pods.
+### Working of Pod Networking
+- Each pod runs inside a separate **Linux network namespace**.
+- A **bridge network** is created on each node (like `cni0`).
+- Pods are connected to this bridge using **veth pairs** (virtual Ethernet).
+- Each node’s bridge uses a **different subnet**:
+  - Node1: 10.244.1.0/24
+  - Node2: 10.244.2.0/24
+  - Node3: 10.244.3.0/24
+### Manual Networking Setup
+1. Create a bridge interface on each node.
+2. Assign subnet to bridge (e.g., 10.244.1.1/24).
+3. When a container is created:
+   - Create **veth pair**.
+   - Attach one end to **container’s namespace**, other to **bridge**.
+   - Assign pod IP (e.g., 10.244.1.2).
+   - Set **default gateway** as bridge IP.
+4. Add **routing table entries** so pods can reach other subnets on other nodes.
+### Cross-Node Pod Communication
+- If Pod A (10.244.1.2 on Node1) wants to reach Pod B (10.244.2.2 on Node2):
+   - Node1 must **know how to reach** 10.244.2.0/24 via Node2 IP (192.168.1.12).
+   - Add route on Node1:  
+     `ip route add 10.244.2.0/24 via 192.168.1.12`
+### Scaling Problem
+- Adding routes manually on all nodes is hard at scale.
+- Better: Use a **central router** or software to manage routing (like SDN).
+### CNI (Container Network Interface)
+- CNI is the plugin system that automates pod networking setup.
+- Kubernetes uses **CNI plugins** to handle pod networking automatically.
+- When a pod is created:
+   1. Container Runtime (like containerd or Docker) calls CNI plugin.
+   2. CNI plugin runs a **script** that:
+      - Create veth pair
+      - Connect pod to node bridge
+      - Assign IP from node subnet
+      - Add routes and update DNS
+   3. On pod deletion, `DEL` section removes the config.
+
+## CNI (Container Network Interface) in Kubernetes
+- [Refer Here](https://github.com/containernetworking/cni) for the Official GitHub Repo.
+- CNI is a **standard interface** used by **container runtimes** (like `containerd`, `CRI-O`) to set up networking for containers.
+- It handles:
+  - Creating pod network namespaces
+  - Connecting them to the right network (e.g., bridge)
+  - Assigning IPs
+  - Setting up routes, NAT, etc.
+### Who Calls the CNI Plugin in Kubernetes
+- **Kubelet** → uses **container runtime** (like `containerd` or `CRI-O`)
+- After a **container is created**, the runtime:
+  - Calls the CNI plugin to **attach networking**
+  - Sets up interfaces, IPs, etc.
+### CNI Plugin & Config Files
+- Configuration file is in `/etc/cni/net.d/`
+  - JSON config files like `10-bridge.conf`
+- Plugin binaries (scripts) are in `/opt/cni/bin/`
+  - Ex: `bridge`, `flannel`, `calico`, `host-local`
+  > If multiple config files exist, the one with the **alphabetically first name** is used.
+### Sample CNI Configuration File – `bridge` Plugin
+- **Configuration File:**
+  ```json
+  {
+    "cniVersion": "0.3.1",
+    "name": "mynet",
+    "type": "bridge",
+    "bridge": "cni0",
+    "isGateway": true,
+    "ipMasq": true,
+    "ipam": {
+      "type": "host-local",
+      "subnet": "10.244.0.0/16",
+      "routes": [{ "dst": "0.0.0.0/0" }]
+    }
+  }
+  ```
+- **Explanation:**
+  - `type` → Type of plugin (e.g., `bridge`)
+  - `isGateway` → Bridge gets IP and acts as gateway for pods
+  - `ipMasq` → Enables NAT for outbound traffic
+  - `ipam.type` → How IPs are managed (`host-local` = local static IPs, `dhcp` = external)
+  - `subnet` → CIDR range used for pod IPs
+### Examples of CNI Plugins
+- **Flannel:** Simple and popular
+- **Calico:** Adds network policy and routing
+- **Weave:** Easy setup
+- **Cilium:** Advanced features (eBPF-based)
+
+## CNI - Weave Plugin
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/network-policy-provider/weave-network-policy/) for the Official docs.
+- A **CNI-based networking solution** for Kubernetes.
+- Handles **pod-to-pod communication across nodes**.
+- Installed as a **DaemonSet** — runs one pod per node.
+### Working of Weave (Analogy)
+- Each node has a **Weave agent (peer)**.
+- These peers **communicate with each other**, knowing the IPs of pods across the cluster.
+- When `Pod-A` sends data to `Pod-B` on a different node:
+  1. The Weave agent intercepts the packet.
+  2. **Encapsulates** it in a new packet (like wrapping a parcel).
+  3. Sends it to the agent on the destination node.
+  4. That agent **decapsulates** and forwards it to the target pod.
+### Weave CNI Architecture
+- Each node gets:
+  - A **Weave agent/pod** (via DaemonSet).
+  - A **Weave bridge interface** (e.g., `weave`).
+- Agents **communicate with each other** to maintain cluster topology (who has which pods and IPs).
+- Pod traffic is **routed through the Weave bridge**.
+### IP Address Management
+- Weave assigns **IP addresses** to pods automatically.
+- Agents maintain **IP allocation state**.
+- Supports **multiple networks** (e.g., Weave + Docker bridge).
+- Routing table in the pod decides which network to use.
+### Deploying Weave CNI
+- Run this to deploy:
+  ```bash
+  kubectl apply -f https://github.com/weaveworks/weave/releases/download/v2.8.1/weave-daemonset-k8s.yaml
+  ```
+- This deploys:
+  - Weave peers as **DaemonSet pods** (1 per node).
+  - All required components to make networking work.
+- **Troubleshooting:**
+  - Use `kubectl logs <weave-pod-name>` to check logs.
+  - Pods should be visible under `kube-system` namespace.
+
+## Kubernetes IP Address Management (IPAM)
+- IP Address Management (IPAM) refers to how **Pods get IP addresses** inside a Kubernetes cluster.
+- **Node IPs** are managed separately (e.g., via cloud provider or static config) and are **not** part of Kubernetes IPAM.
+- Kubernetes relies on **CNI (Container Network Interface) plugins** to manage pod network and IP allocation.
+### Role of CNI Plugin in IPAM
+- CNI plugin is responsible for:
+  - Assigning **unique IP addresses** to each Pod.
+  - Managing the **subnet** and **routing** for pod communication.
+- Kubernetes **does not manage** pod IPs directly — it delegates this task entirely to the **CNI plugin**.
+### IP Allocation Mechanism
+- Each **node** has a **virtual bridge network** with a subnet.
+- CNI plugin:
+  - Selects an IP from the available subnet.
+  - Assigns this IP to the Pod’s **network namespace** during Pod creation.
+- IP tracking is essential to **avoid duplicate IPs** across pods.
+### IPAM Configuration in CNI
+- The CNI config file includes an `ipam` section:
+  ```json
+  "ipam": {
+    "type": "host-local",
+    "subnet": "10.1.0.0/16",
+    "routes": [...]
+  }
+  ```
+  - **type**: Type of IPAM plugin (e.g., `host-local`, `dhcp`).
+  - **subnet**: IP range for pods on that node.
+  - **routes**: Optional static routes to add for pods.
+### Built-in CNI IPAM Plugins
+1. **`host-local` Plugin**
+   - Manages IPs locally on each node.
+   - Stores assigned IPs in local files (e.g., `/var/lib/cni/networks/...`).
+   - Good for simple/static IP allocation per node.
+2. **`dhcp` Plugin**
+   - Uses external DHCP server to assign IPs dynamically.
+### Weave CNI – IPAM Behavior
+- **IP Range**
+  - By default, Weave uses the range: `10.32.0.0/12`
+    - Usable IPs: `10.32.0.1` to `10.47.255.254`
+    - Provides ~1 million IP addresses.
+- **IP Assignment**
+  - Entire IP range is divided among all participating nodes (peers).
+  - Each node gets a portion of the range and assigns IPs to its local pods.
+- **Configurability**
+  - IP range can be changed using **options while deploying** the Weave plugin.
+
+## Kubernetes Service Networking
+- Pods in Kubernetes get their own **network namespace**.
+- Each pod gets a **unique IP** from the **node's subnet**.
+- Nodes are connected through **routing/overlay networks**, enabling pods on different nodes to communicate.
+- Pods are **ephemeral**; their IPs can change.
+- To access a pod (like a backend or database), we **don’t connect directly to pod IPs**.
+- Instead, we use **Services** to access applications inside pods.
+### Types of Services
+1. **ClusterIP** (Default)
+    - Accessible **only inside the cluster**.
+    - Suitable for internal apps like databases.
+    - Assigned an IP from the **`service-cluster-ip-range`**.
+    - Virtual — no process actually runs on this IP.
+2. **NodePort**
+    - Exposes the service on a **port on all nodes**.
+    - Useful for accessing the app from **outside the cluster**.
+    - Still works as ClusterIP **inside the cluster**.
+### Services Work Internally
+- Services are **virtual objects**, not real processes.
+- When a service is created, **`kube-proxy`** sets up routing rules on each node:
+  - **iptables** (default)
+  - **IPVS** (optional)
+  - **userspace** (legacy)
+### Role of `kube-proxy`
+- Watches for service creation via the **API server**.
+- Creates **iptables rules** for service IPs.
+- Handles traffic forwarding from service IP to actual pod IPs.
+- Example Rule (NAT table):
+  ```bash
+  iptables -L -t nat | grep local-cluster
+  ```
+- You’ll see DNAT and MASQUERADE rules pointing to pod IP and port.
+### Checking IPs and Services
+- Check Pod IPs
+  ```bash
+  kubectl get pods -o wide
+  ```
+- Check Services
+  ```bash
+  kubectl get svc
+  ```
+- Check Service CIDR Range
+  ```bash
+  ps -aux | grep kube-apiserver
+  # Look for: --service-cluster-ip-range=10.96.0.0/12
+  ```
+### kube-proxy Logs
+- Check logs for rules created by `kube-proxy`.
+  ```bash
+  cat /var/log/kube-proxy.log
+  # Look for entries like: "Adding new service..." and proxy mode (iptables/ipvs)
+  ```
+### Important Ranges (Must Not Overlap)
+- Pod CIDR example: `10.244.0.0/16`
+- Service CIDR example: `10.96.0.0/12`
+- Ensure these ranges **do not overlap**.
+
+## DNS in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/) for the Official docs.
+- DNS helps pods/services communicate by **name** instead of IP.
+- Kubernetes **automatically sets up a DNS server** (CoreDNS) in the cluster.
+- You don’t need to configure DNS yourself unless setting up K8s manually.
+- **DNS Resolution - Key Concepts:**
+  1. **Services** get **DNS records** created automatically.
+  2. **Pods** do **not** get DNS records **by default** — must be enabled explicitly.
+  3. DNS is used **within the cluster only** for resolving names of pods/services.
+### Service DNS Name Formats
+- If **same namespace**: use **just the service name**
+  - `<service-name>`
+- If **different namespace**: use
+  - `<service-name>.<namespace-name>`
+- **Full FQDN (Fully Qualified Domain Name)**:
+  - `<service-name>.<namespace-name>.svc.cluster.local`
+### DNS Domain Structure
+- `<service-name>.<namespace>.svc.cluster.local`
+- **Breakdown:**
+  - `svc` → Indicates it’s a service  
+  - `cluster.local` → Default root domain of cluster DNS
+### DNS Record for Pods (Optional)
+- **Not created by default**
+- When enabled:
+  - DNS name format: `<ip-with-dashes>.<namespace>.pod.cluster.local`
+  - Example: `10-244-1-5.default.pod.cluster.local`
+### DNS Tools (for practice/debugging)
+- `nslookup`, `host`, `dig` → Tools to query DNS
+- Check resolution from inside a pod using:
+  ```bash
+  nslookup web-service
+  ```
+
+## CoreDNS in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/tasks/administer-cluster/coredns/) for the Official docs.
+- Static IP-based communication between pods isn’t scalable (too many IPs, dynamic changes).
+- Kubernetes solves this by setting up a **cluster-internal DNS service** so:
+  - Pods can resolve **services/pods** using names instead of IPs.
+  - Names are automatically updated as pods/services come and go.
+### DNS Flow in Kubernetes
+- A **CoreDNS server** runs as pods in the `kube-system` namespace.
+- A **service named `kube-dns`** (ClusterIP) exposes CoreDNS to the cluster.
+- Every pod gets an entry in its `/etc/resolv.conf`:
+   - `nameserver 10.96.0.10` → IP of CoreDNS
+   - `search` domain suffixes: `.default.svc.cluster.local` etc.
+- When a pod queries another pod/service, it uses CoreDNS to resolve the name.
+### CoreDNS Details
+- **CoreDNS** is a DNS server introduced in **K8s v1.12** (replaced `kube-dns`).
+- Runs as **2 pods** in the `kube-system` namespace for **high availability**.
+- Backed by a **ReplicaSet in a Deployment**.
+- Uses a config file: **`Corefile`** located in `/etc/coredns`.
+### CoreDNS Configuration (`Corefile`)
+- Check ConfigMap of CoreDNS:
+  ```bash
+  $ kubectl describe configmap coredns -n kube-system
+  ```
+- **Plugins in `Corefile`**:
+  - Handles things like: `errors`, `health`, `metrics`, `cache`.
+  - Key plugin: **`kubernetes` plugin**
+    - Sets cluster domain (default: `cluster.local`).
+    - Controls pod/service DNS record creation.
+  - **Pod records** can be enabled using `pods` field (disabled by default)
+    > **Pod DNS records are not created by default** – must be enabled manually using `pods verified`.
+### Service Discovery Process
+- CoreDNS **watches the API server**.
+- On new pod/service creation, it **creates DNS entries**.
+- CoreDNS is exposed via a Kubernetes **Service** (default: `kube-dns`).
+- The **IP of this service is 10.96.0.10** (by default).
+- **All pods get this IP as their DNS server** in `/etc/resolv.conf`.
+### Pod Configuration (Automatically Done)
+- `kubelet` sets the DNS settings in pods’ `/etc/resolv.conf`.
+- It configures:
+  - `nameserver 10.96.0.10`
+  - `search default.svc.cluster.local svc.cluster.local cluster.local`
+  > These search domains allow resolution even with partial names like `web-service`.
+
+## Ingress in Kubernetes
+- [Refer Here](https://kubernetes.io/docs/concepts/services-networking/ingress/) for the Official docs.
+- **Ingress** is a Kubernetes object that manages external access to services within the cluster.
+- **Ingress** allows external users to access services in a Kubernetes cluster **via a single URL** and **route traffic based on path or domain**.
+- It also helps configure SSL for secure communication.
+### Use of Ingress
+- Central point to **manage routing + SSL**
+- One LoadBalancer + One Ingress Controller can handle **many apps**
+- Routes traffic based on:
+  - **Path** (e.g., `/wear`, `/watch`)
+  - **Host** (e.g., `api.example.com`, `web.example.com`)
+- Configure all using **Kubernetes YAML files**
+### Working of Ingress
+- Ingress = Layer 7 (HTTP/HTTPS) Load Balancer inside the cluster
+- Needs 2 components:
+  1. **Ingress Controller:**
+     - [Refer Here](https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/) for the Official docs
+     - A solution (e.g., Nginx, HAProxy, Traefik) deployed in the Kubernetes cluster that watches for changes in the ingress resources and updates the routing accordingly.
+     - Examples: **Nginx**, **HAProxy**, **Traefik**, **Istio**, and **Google Cloud LoadBalancer (GCE)**.
+  2. **Ingress Resource**:
+     - YAML with routing rules.
+     - Configuration files that define routing rules for services based on URL paths or hostnames. For example:
+       - `my-online-store.com/wear` → Route to the wear app.
+       - `my-online-store.com/watch` → Route to the video app.
+       - `wear.my-online-store.com` → Route to the wear app.
+- **Not Built-in by Default:**
+  - Kubernetes does **NOT** include an Ingress Controller by default
+  - You must install it separately (e.g., `nginx-ingress` via Helm or YAML)
+### Key Concepts:
+1. **Services in Kubernetes:**
+   - A **ClusterIP service** makes a pod accessible only within the cluster.
+   - A **NodePort service** exposes a pod on a high-numbered port on all nodes, accessible from outside the cluster, but users need to remember the port.
+2. **Cloud Environment vs On-prem:**
+   - On a public cloud (e.g., Google Cloud), using a **LoadBalancer** service type provisions a cloud-based LoadBalancer to route traffic to your application.
+   - This makes your app accessible via a single external IP, which is easier to manage.
+3. **Challenges in Production:**
+   - With multiple services (e.g., an online store and a video streaming service), managing different LoadBalancers and their costs can be complex and expensive.
+   - You need a way to route traffic to different services based on the URL path (e.g., `/wear` for the store, `/watch` for videos).
+   - SSL/TLS configuration is required to secure your services (HTTPS).
+4. **Ingress Controller:**
+   - Ingress provides a centralized way to manage routing and SSL by using an **Ingress Controller**, which acts like a Layer 7 LoadBalancer.
+   - It allows URL-based routing and SSL termination for multiple services in your cluster.
+5. **Steps to Set Up Ingress:**
+   1. **Deploy Ingress Controller:** (e.g., Nginx ingress controller as a deployment in the cluster).
+   2. **Create Ingress Resources:** Define rules for routing based on URL paths or hostnames.
+   3. **Expose the Controller:** You can expose the ingress controller via a **NodePort** or **LoadBalancer** service.
+   4. **Set Up SSL:** Configure SSL/TLS at the ingress controller level to secure the traffic.
+  ![preview](./Images/Kubernetes_CKA46.png)
+### Ingress Setup - Nginx Ingress Controller
+- **ConfigMap:** For Nginx-specific configurations
+   ```yaml
+   # nginx-ingress-config ConfigMap
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: nginx-ingress-config
+     namespace: ingress-nginx
+   data:
+     proxy-connect-timeout: "30"
+     proxy-read-timeout: "20"
+     use-forwarded-headers: "true"
+     enable-vts-status: "false"
+   ```
+- **Service Account:** To manage permissions for the controller.
+   ```yaml
+   # Namespace for NGINX Ingress
+   apiVersion: v1
+   kind: Namespace
+   metadata:
+     name: ingress-nginx
+
+   ---
+   # ServiceAccount
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     name: nginx-ingress-serviceaccount
+     namespace: ingress-nginx
+
+   ---
+   # ClusterRole
+   apiVersion: rbac.authorization.k8s.io/v1
+   kind: ClusterRole
+   metadata:
+     name: nginx-ingress-clusterrole
+   rules:
+   - apiGroups: [""]
+     resources: ["configmaps", "endpoints", "pods", "secrets", "services", "nodes"]
+     verbs: ["list", "watch"]
+   - apiGroups: ["extensions", "networking.k8s.io"]
+     resources: ["ingresses", "ingressclasses"]
+     verbs: ["get", "list", "watch"]
+   - apiGroups: [""]
+     resources: ["nodes", "nodes/proxy"]
+     verbs: ["get"]
+   - apiGroups: ["coordination.k8s.io"]
+     resources: ["leases"]
+     verbs: ["get", "watch", "list", "create", "update", "patch", "delete"]
+
+   ---
+   # ClusterRoleBinding
+   apiVersion: rbac.authorization.k8s.io/v1
+   kind: ClusterRoleBinding
+   metadata:
+     name: nginx-ingress-clusterrole-nisa-binding
+   roleRef:
+     apiGroup: rbac.authorization.k8s.io
+     kind: ClusterRole
+     name: nginx-ingress-clusterrole
+   subjects:
+   - kind: ServiceAccount
+     name: nginx-ingress-serviceaccount
+     namespace: ingress-nginx
+   ```
+- **Deployment:** Create a deployment for Nginx ingress controller.
+   ```yaml
+   # NGINX Ingress Controller Deployment
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: nginx-ingress-controller
+     namespace: ingress-nginx
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: nginx-ingress
+     template:
+       metadata:
+         labels:
+           app: nginx-ingress
+       spec:
+         serviceAccountName: nginx-ingress-serviceaccount
+         containers:
+           - name: nginx-ingress-controller
+             image: k8s.gcr.io/ingress-nginx/controller:v1.9.4
+             args:
+               - /nginx-ingress-controller
+               - --configmap=$(POD_NAMESPACE)/nginx-ingress-config
+             env:
+               - name: POD_NAME
+                 valueFrom:
+                   fieldRef:
+                     fieldPath: metadata.name
+               - name: POD_NAMESPACE
+                 valueFrom:
+                   fieldRef:
+                     fieldPath: metadata.namespace
+             ports:
+               - containerPort: 80
+               - containerPort: 443
+   ```
+- **Service:** Expose the ingress controller using a NodePort or LoadBalancer.
+   ```yaml
+   # LoadBalancer Service to expose Ingress Controller
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: nginx-ingress-service
+     namespace: ingress-nginx
+   spec:
+     type: LoadBalancer
+     selector:
+       app: nginx-ingress
+     ports:
+       - name: http
+         port: 80
+         targetPort: 80
+       - name: https
+         port: 443
+         targetPort: 443
+   ```
+- **Commands:**
+  ```bash
+  kubectl get ingressclass
+  # List the ingressclass resources
+  kubectl describe ingressclass <ingressclass-name>
+  # Show details of ingressclass
+  ```
+### Ingress Resource Definition
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `Ingress`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#ingress-v1-networking-k8s-io) for the **Ingress Service APIs**.
+  - Based on **Ingress Service APIs** write YAML file.
+  - Define routing rules for services based on hostnames and URL paths.
+    ```yaml
+    apiVersion: networking.k8s.io/v1
+    kind: Ingress
+    metadata:
+      name: example-ingress
+      namespace: default
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /
+        nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    spec:
+      ingressClassName: nginx
+      rules:
+      - host: example.com
+        http:
+          paths:
+          - path: /wear
+            pathType: Prefix
+            backend:
+              service:
+                name: wear-service
+                port:
+                  number: 80
+          - path: /watch
+            pathType: Prefix
+            backend:
+              service:
+                name: watch-service
+                port:
+                  number: 80
+    ```
+- **Commands:**
+  ```bash
+  kubectl apply -f online-store-ingress.yaml
+  # Create the ingress
+  kubectl get ingress
+  # List the ingress
+  kubectl describe ingress online-store-ingress
+  # Describe the ingress
+  ```
+### TLS Secret for SSL Certificates (Optional)
+- This is an example of how to create a TLS secret for SSL certificates.
+  ```yaml
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: my-online-store-tls
+    namespace: default
+  type: kubernetes.io/tls
+  data:
+    tls.crt: <your-base64-encoded-cert>
+    tls.key: <your-base64-encoded-key>
+  ```
+- Add `SSL settings` in Ingress resource:
+  - In Ingress `spec` → Add `tls`
+    ```yaml
+    spec:
+      rules:
+        <rules-data>
+      tls:
+        - hosts:
+            - my-online-store.com
+          secretName: my-online-store-tls
+    ```
+### Benefits of Using Ingress:
+- Simplifies managing traffic routing and SSL configurations.
+- Reduces the need for multiple LoadBalancers, which can be expensive.
+- Provides flexibility in handling different URL-based traffic and securing it with SSL.
+
+## Gateway API
+- [Refer Here](https://kubernetes.io/docs/concepts/services-networking/gateway/) for the Official docs.
+- **Gateway API** is a **new and improved way** to control **network traffic** into your Kubernetes cluster.
+- It’s **more powerful than Ingress** and supports more use cases like:
+  - HTTP(S), TCP, UDP, gRPC traffic
+  - Traffic splitting
+  - TLS termination
+  - CORS, headers, etc.
+- It aims to **replace Ingress** in the long run and works for **Layer 4 (TCP/UDP)** and **Layer 7 (HTTP/HTTPS/gRPC)**.
+### Roles in Gateway API
+- **Infrastructure Provider** → Creates `GatewayClass`
+- **Cluster Operator** → Creates `Gateway`
+- **App Developer** → Creates `HTTPRoute`, `TCPRoute`, etc.
+### Steps to Create Gateway API Resources
+- [Refer Here](https://gateway-api.sigs.k8s.io/) for the Official docs.
+- Steps:
+  1. Install Gateway API CRDs
+  2. Install a Gateway Controller (like NGINX or Envoy)
+  3. Create a **GatewayClass**
+  4. Create a **Gateway**
+  5. Create an **HTTPRoute**
+  6. Create a **backend Service + Deployment**
+#### Step:1 `Install Gateway API CRDs`
+- These define the new Gateway resources in the cluster.
+- [Refer Here](https://github.com/kubernetes-sigs/gateway-api/releases) for the Official GitHub Repo.
+  ```bash
+  kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v1.5.1" | kubectl apply -f -
+  ```
+  - This installs resources like `GatewayClass`, `Gateway`, `HTTPRoute`, etc.
+#### Step:2 `Install a Gateway Controller`
+- Let’s use **NGINX Gateway Controller** (you can also use Traefik, Istio, etc.).
+  ```bash
+  kubectl apply -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v1.6.1/deploy/crds.yaml
+  # Deploy the NGINX Gateway Fabric CRDs
+  kubectl apply -f https://raw.githubusercontent.com/nginx/nginx-gateway-fabric/v1.6.1/deploy/nodeport/deploy.yaml
+  # Deploy NGINX Gateway Fabric
+  kubectl get pods -n nginx-gateway
+  #Verify the Deployment
+  ```
+  - This deploys a controller that can handle Gateway API resources.
+#### Step:3 `Create a GatewayClass`
+- This tells Kubernetes **which controller** to use.
+  ```yaml
+  # gateway-class.yaml
+  apiVersion: gateway.networking.k8s.io/v1
+  kind: GatewayClass
+  metadata:
+    name: nginx-gateway
+  spec:
+    controllerName: nginx.org/gateway-controller
+  ```
+  - Popular Gateway controllers with their `controllerName` values:
+    1. NGINX Gateway Fabric → `gateway.nginx.org/nginx-gateway-controller`
+    2. Istio → `istio.io/gateway-controller`
+    3. Contour → `projectcontour.io/gateway-controller`
+    4. Envoy Gateway → `gateway.envoyproxy.io/gatewayclass-controller`
+    5. Kong Gateway → `konghq.com/kic-gateway-controller`
+- Create a GatewayClass:
+  ```bash
+  kubectl apply -f gateway-class.yaml
+  ```
+  - Think of this like saying “I want to use NGINX to manage my gateways.”
+#### Step:4 `Create a Gateway`
+- This sets up **what port to listen on (like 80/443)** and allows routing to services.
+  ```yaml
+  # gateway.yaml
+  apiVersion: gateway.networking.k8s.io/v1
+  kind: Gateway
+  metadata:
+    name: web-gateway
+  spec:
+    gatewayClassName: nginx-gateway
+    listeners:
+      - name: http
+        protocol: HTTP
+        port: 80
+        allowedRoutes:
+          kinds:
+            - kind: HTTPRoute
+          namespaces:
+            from: All
+  ```
+- Create a Gateway:
+  ```bash
+  kubectl apply -f gateway.yaml
+  ```
+  - This opens port 80 and allows routes using HTTPRoute to be connected.
+#### Step:5 `Create an HTTPRoute`
+- This tells **which path or host** should send traffic to which service.
+  ```yaml
+  # httproute.yaml
+  apiVersion: gateway.networking.k8s.io/v1
+  kind: HTTPRoute
+  metadata:
+    name: web-route
+  spec:
+    parentRefs:
+      - name: web-gateway   # connect to the Gateway (GatewayName)
+        namespace: default  # Gateway namespace
+    hostnames:
+      - "example.com"       # match domain
+    rules:
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /
+        backendRefs:
+          - name: web-service  # Kubernetes service
+            port: 80
+  ```
+- Create an HTTPRoute:
+  ```bash
+  kubectl apply -f httproute.yaml
+  ```
+  - This sends requests from `example.com` to `web-service`.
+#### Step:6 `Create Backend Service and Deployment`
+- You need a working backend (like a simple web app):
+  ```yaml
+  # deployment.yaml
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: web-app
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: web
+    template:
+      metadata:
+        labels:
+          app: web
+      spec:
+        containers:
+          - name: web
+            image: nginx
+            ports:
+              - containerPort: 80
+  
+  ---
+  # service.yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: web-service
+  spec:
+    selector:
+      app: web
+    ports:
+      - port: 80
+        targetPort: 80
+  ```
+- Create Backend Deployment with Service:
+  ```bash
+  kubectl apply -f web-app.yaml
+  ```
+#### Verify It Works
+- Commands:
+  ```bash
+  kubectl get gatewayclasses
+  # List all available `GatewayClass` resources in the cluster
+  kubectl describe gatewayclass <name>
+  # Show detailed information (controller, status) about a specific `GatewayClass`
+  kubectl get gateways
+  # List all `Gateway` resources in the current namespace
+  kubectl describe gateway <name>
+  # Show ports, TLS info, listeners, and route status for a specific `Gateway`
+  kubectl get httproutes
+  # List all `HTTPRoute` resources in the current namespace
+  kubectl describe httproute <name>
+  # Show route rules, hostnames, backend services, filters (CORS, header mods, etc.).
+  kubectl get tcpRoutes
+  # List all `TCPRoute` resources (Layer 4 traffic)
+  kubectl get grpcroutes
+  # List all `GRPCRoute` resources (gRPC-specific routing)
+  kubectl explain gateway
+  # Show the schema (fields and types) of the `Gateway` resource
+  kubectl get gatewayclasses.gateway.networking.k8s.io
+  #Ensure the full API group is being used when querying resources
+  ```
+### Gateway API Resources
+#### TLS (No Annotations Needed)
+- You define **TLS directly inside the `Gateway` resource**, under the `listeners` section.
+  ```yaml
+  spec:
+    listeners:
+      - name: https
+        port: 443
+        protocol: HTTPS
+        tls:
+          mode: Terminate
+          certificateRefs:
+            - name: tls-secret   # Kubernetes TLS Secret
+        allowedRoutes:
+          kinds:
+            - kind: HTTPRoute
+  ```
+- **Where TLS is defined:** In the `Gateway` → `spec` → `listeners` → `tls` section.
+#### Traffic Splitting (Built-in Feature)
+- This is defined **inside the `HTTPRoute` resource**, under the `rules` section.
+  ```yaml
+  spec:
+    rules:
+      - backendRefs:
+          - name: service-v1
+            port: 80
+            weight: 80
+          - name: service-v2
+            port: 80
+            weight: 20
+  ```
+- **Where Traffic Splitting is defined:** In the `HTTPRoute` → `spec` → `rules` → `backendRefs` with `weight`.
+#### CORS (Using Filters)
+- You define CORS headers using **filters inside the `HTTPRoute` resource**.
+  ```yaml
+  spec:
+    rules:
+      - filters:
+          - type: ResponseHeaderModifier
+            responseHeaderModifier:
+              add:
+                - name: Access-Control-Allow-Origin
+                  value: "*"
+                - name: Access-Control-Allow-Methods
+                  value: "GET, POST"
+        backendRefs:
+          - name: web-service
+            port: 80
+  ```
+- **Where CORS is defined:** In the `HTTPRoute` → `spec` → `rules` → `filters` → `responseHeaderModifier`.
+### Benefits of Gateway API
+- True **multi-tenancy support**
+- **More flexible protocols** (HTTP, TCP, gRPC, etc.)
+- **No vendor lock-in** – config works across controllers
+- **Cleaner, declarative configs**
+- **Supports service mesh features natively**
+- **Supported By:**
+  - AWS (EKS), Azure, GKE, Envoy, Traefik, Contour, and more.
