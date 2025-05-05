@@ -6195,3 +6195,186 @@ spec:
 - **Supports service mesh features natively**
 - **Supported By:**
   - AWS (EKS), Azure, GKE, Envoy, Traefik, Contour, and more.
+
+
+# <p align="center">Design & Install a Kubernetes Cluster</p>
+
+## Design a Kubernetes Cluster
+### Questions to Ask Before Designing
+1. **Purpose of the Cluster?**
+   - Learning
+   - Development/Testing
+   - Production
+2. **Where Will It Be Hosted?**
+   - **Cloud managed** (GCP, AWS, Azure)
+   - **Self-hosted** (on-prem or custom VMs)
+3. **What Workloads?**
+   - Few or many applications?
+   - Web apps, big data, analytics?
+   - Heavy traffic or occasional bursts?
+### Purpose of the Cluster
+#### For Learning Purposes
+- Use **Minikube** or single-node `kubeadm` setup
+- Run locally (VirtualBox, etc.) or in the cloud (GCP/AWS)
+#### For Development/Testing
+- Use a **multi-node cluster**: 1 master + multiple workers
+- Tools:
+  - `kubeadm`
+  - GKE (GCP)
+  - EKS (AWS)
+  - AKS (Azure)
+#### For Production
+- Use **highly available cluster**:
+  - **Multiple masters**
+  - **Multiple workers**
+- Tools:
+  - `kubeadm` (manual setup)
+  - `kOps` (for AWS)
+  - Managed cloud services (GKE, EKS, AKS)
+- **Cluster Capacity Limits:**
+  - Max **5,000 nodes**
+  - Max **150,000 pods**
+  - Max **300,000 containers**
+  - Max **100 pods per node**
+- **Node Sizing:**
+  - Cloud providers auto-select node sizes.
+  - For **on-prem**, follow provider guidelines or docs for instance types.
+  ![preview](./Images/Kubernetes_CKA47.png)
+### Storage Considerations
+- **High performance**: Use **SSD-backed** storage.
+- **Shared Access**: Use **Persistent Volumes**.
+- **Multiple Pods access**: Use **Network-based or Shared volumes**.
+- Define **StorageClasses** to match app needs.
+### Nodes
+- Nodes can be **physical**, **VMs**, or **cloud VMs**.
+- In the course, we use 3 VMs (1 master + 2 workers).
+- Master = control plane; Workers = workloads
+- **Best Practice:** Don’t schedule workloads on master, Unless necessary (in small setups)
+### Important Points
+- **Taints on Master Nodes:**
+  - `kubeadm` adds a **taint** to prevent scheduling pods on master:
+    ```bash
+    kubectl taint nodes <master-node> node-role.kubernetes.io/master:NoSchedule
+    ```
+- **OS Requirements:**
+  - Use **64-bit Linux OS** on all nodes.
+- **`etcd` Placement:**
+  - By default, etcd runs on master nodes.
+  - In **large clusters**, you can isolate etcd on **separate nodes** for better performance/reliability.
+
+## Choosing Kubernetes Infrastructure
+- Kubernetes can be deployed in different environments, from your **laptop** to **on-prem servers** or the **cloud**. The right choice depends on:
+  - Your infrastructure (local/cloud)
+  - Type of applications
+  - Purpose (testing vs. production)
+### Local Deployment Options
+- **Linux Systems:**
+  - **Manual Setup:** Install binaries and configure everything manually (not recommended for beginners).
+  - **Automated Tools:** Better option for quick setup.
+- **Windows Systems:**
+  - Can't run Kubernetes natively.
+  - Must use **virtualization tools** like:
+    - **Hyper-V**
+    - **VirtualBox**
+    - **VMware Workstation**
+  - You can run Kubernetes as Docker containers inside Linux VMs.
+- **Popular Local Setup Tools:**
+  - **Minikube:** Sets up a **single-node** cluster using VirtualBox/VM. Easy and fast for testing.
+  - **Kubeadm:** Tool to set up **single/multi-node** clusters. Requires **pre-provisioned VMs**. More flexible than Minikube.
+- Used mainly for **learning, development, or testing** – not production.
+### Production-Grade Deployment Options
+1. **Turnkey Solutions:**
+   - You provision VMs, then use tools/scripts to deploy Kubernetes.
+   - **You manage VMs** (patching, upgrades).
+   - Examples:
+     - **KOPS** (Kubernetes on AWS)
+     - **OpenShift** (Red Hat, on-prem with GUI & CI/CD tools)
+     - **Cloud Foundry Container Runtime** (uses BOSH to manage clusters)
+     - **VMware Cloud PKS**
+     - **Vagrant scripts**
+2. **Hosted/Managed Solutions:**
+   - Everything is provisioned and managed by the **cloud provider**.
+   - Easy and fast.
+   - Ideal for **production**.
+   - Examples:
+     - **Google Kubernetes Engine (GKE)**
+     - **OpenShift Online**
+     - **Azure Kubernetes Service (AKS)**
+     - **Amazon EKS**
+
+## Configure High Availability (HA) in Kubernetes Cluster
+- If the **master node fails**, the cluster becomes **unmanageable**:
+  - Apps still run **if workers and pods are healthy**.
+  - But if a pod crashes, no controller is available to **recreate it**.
+  - You **can't use `kubectl` or access the API**.
+- **Solution: `Multiple Master Nodes`**
+  - Use **more than one master** to avoid **single point of failure**.
+  - Add redundancy for:
+    - Master nodes
+    - Control plane components (API server, scheduler, controller manager, etcd)
+    - Applications (already redundant via ReplicaSets)
+### Key Components in HA Setup
+#### 1. API Server
+- Handles **client requests (kubectl)** and **cluster communication**.
+- Supports **Active-Active mode** (all API servers run and handle requests).
+- Use a **Load Balancer** (e.g., NGINX, HAProxy) in front of API servers.
+- `kubectl` is configured to send traffic to **Load Balancer**, not directly to master.
+#### 2. Scheduler & Controller Manager
+- These **must run in Active-Passive mode** (only one active at a time).
+- Use **Leader Election** to choose which one is active.
+  - Controlled via flags:
+    - `--leader-elect=true` (default)
+    - `--leader-elect-lease-duration=15s` (default lease time)
+    - `--leader-elect-renew-deadline=10s` (renew interval)
+    - `--leader-elect-retry-period=2s` (retry interval)
+#### 3. etcd
+- Kubernetes stores all state in etcd.
+- Two possible topologies:
+  1. **Stacked Topology:**
+     - etcd runs **on same node** as control plane.
+     - Easy setup.
+     - **Less resilient**: losing node = losing etcd + control plane.
+  2. **External etcd Topology:**
+     - etcd runs on **separate dedicated nodes**.
+     - **More resilient**, but needs more nodes and setup.
+     - Recommended for **production**.
+     - Only the **API server** talks to etcd.
+       - Must specify correct etcd addresses using `--etcd-servers=<ip:port>`.
+       - etcd is **distributed**: API server can connect to any etcd node.
+
+## etcd in High Availability
+- ETCD is a **distributed, reliable key-value store** used by Kubernetes.
+- Stores all cluster data: nodes, pods, config maps, secrets, etc.
+- Simple, secure, and fast.
+- Stores data in **key-value** format (like a dictionary or JSON/YAML files).
+- Each record is independent (modifying one doesn’t affect others).
+- Used for configuration and state data in Kubernetes.
+### Use of High Availability (HA)
+- etcd stores **critical data** — losing it = losing your cluster’s state.
+- Running **etcd on multiple nodes** (a cluster) provides data redundancy and fault tolerance.
+### etcd Clustering
+- **Multiple etcd nodes** form a cluster and hold **identical copies** of the data.
+- You can **read from any node**, but **writes are handled by a leader node only**.
+#### Leader and Follower Nodes
+- One etcd node is elected as the **leader**, others are **followers**.
+- Writes:
+  - If done via **leader**, it's processed and replicated.
+  - If done via **follower**, the request is **forwarded to the leader**.
+- A write is **successful only after** a **majority of nodes (quorum)** accept it.
+#### Raft Protocol (for consensus)
+- Ensures **consistency and leader election**.
+- Uses **randomized timers** to elect a leader.
+- The leader sends **regular heartbeats** to followers to maintain authority.
+- If heartbeat is missed, a **new election** is triggered.
+#### Quorum (Majority Required for Write)
+- **Quorum = (Total Nodes / 2) + 1**
+- Required for etcd to accept writes and maintain consistency.
+- Examples:
+  - 1 node → quorum = 1
+  - 2 nodes → quorum = 2 (not useful; both must be up)
+  - 3 nodes → quorum = 2
+  - 5 nodes → quorum = 3
+- **Minimum recommended etcd cluster size = 3 nodes**
+#### If a node fails
+- As long as **quorum is maintained**, etcd continues to operate.
+- When a failed node recovers, it **syncs missing data** from the leader.
