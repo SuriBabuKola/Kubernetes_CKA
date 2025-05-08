@@ -6378,3 +6378,407 @@ spec:
 #### If a node fails
 - As long as **quorum is maintained**, etcd continues to operate.
 - When a failed node recovers, it **syncs missing data** from the leader.
+
+
+# <p align="center">Install Kubernetes using Kubeadm</p>
+
+## kubeadm
+- `kubeadm` is a CLI tool used to **bootstrap (initialize)** a Kubernetes cluster.
+- It simplifies setting up clusters by automatically handling:
+  - Installing cluster components (kube-apiserver, etcd, controller-manager, etc.)
+  - Generating certificates
+  - Configuring communication between components
+- **Use of `kubeadm`:**
+  - Manually setting up a cluster is complex due to:
+    - Many components to configure
+    - Certificate and networking requirements
+  - `kubeadm` follows **Kubernetes best practices** to make the setup easier and faster.
+### Cluster Setup Requirements
+1. **Multiple machines (physical or VMs)**:
+   - 1 master node
+   - 1 or more worker nodes
+2. **Container runtime** (e.g., containerd)
+3. **kubeadm**, **kubelet**, and **kubectl** installed on all nodes
+4. **POD network** plugin required for communication between pods
+#### High-Level Setup Steps with `kubeadm`
+1. **Provision nodes** (e.g., using Vagrant + VirtualBox)
+2. **Install container runtime** (e.g., containerd)
+3. **Install kubeadm, kubelet, kubectl** on all nodes
+4. **Initialize the master node** with `kubeadm init`
+5. **Install a POD network** (e.g., Calico, Flannel)
+6. **Join worker nodes** using `kubeadm join` command from master
+7. **Start deploying applications**
+### Demo Environment Tools and Setup
+- **VirtualBox**: Hypervisor to run VMs
+- **Vagrant**: Automation tool to quickly provision VMs
+#### Step:1 `Install VirtualBox & Vagrant`
+- **VirtualBox Installation:**
+  - [Refer Here](https://www.virtualbox.org/) for the Official site.
+  - Go to Official site and click `Download`.
+  - Download and Install `VirtualBox Platform Packages` based on OS.
+- **Vagrant Installation:**
+  - [Refer Here](https://developer.hashicorp.com/vagrant) for the Official site.
+  - Go to Official site and click `Install`.
+  - Download and Install based on OS.
+#### Step:2 `Vagrant Setup Process`
+- [Refer Here](https://github.com/kodekloudhub/certified-kubernetes-administrator-course) for the GitHub Repo.
+  - In `kubeadm-clusters/virtualbox` directory we have file `Vagrantfile`.
+- Clone the Repo and Navigate to `Vagrantfile` path.
+- Use `vagrant up` command to create VM's.
+- Connect to all Vm's.
+- **Commands:**
+  ```bash
+  vagrant up         # Provision VMs
+  vagrant status     # Check VM status
+  vagrant ssh <node> # Connect to node
+  vagrant destroy    # Destroy VMs
+  ```
+### Steps to Install Kubernetes using `kubeadm`
+- Steps to install a Kubernetes cluster using **kubeadm**, with:
+  - **1 Control Plane Node**
+  - **2 Worker Nodes**
+  - **Containerd** as the Container Runtime
+  - **Flannel** as the CNI plugin
+#### Step:1 `Install Kubeadm (on all nodes)`
+- [Refer Here](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/) for the Official docs.
+- **Prerequisites:**
+  - Ensure each Node meets these:
+    - **OS:** Ubuntu 20.04/22.04 (or compatible Linux)
+    - Minimum 2 CPUs and 2 GB RAM per node
+    - SSH access between nodes
+    - Disable swap (`swapoff -a`)
+    - Same timezone, and hostname set per node
+    - Allow required ports through the firewall (if enabled)
+- **Step:1 `Set Hostnames`**
+  ```bash
+  # Control plane node
+  sudo hostnamectl set-hostname controlplane
+
+  # Worker nodes
+  sudo hostnamectl set-hostname node01
+  sudo hostnamectl set-hostname node02
+  ```
+- **Step:2 `Update OS and Load Kernel Modules`**
+  ```bash
+  sudo apt update && sudo apt upgrade -y
+
+  # Load kernel modules
+  cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+  overlay
+  br_netfilter
+  EOF
+
+  sudo modprobe overlay
+  sudo modprobe br_netfilter
+
+  # Set sysctl params
+  cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+  net.bridge.bridge-nf-call-iptables  = 1
+  net.bridge.bridge-nf-call-ip6tables = 1
+  net.ipv4.ip_forward                 = 1
+  EOF
+
+  # Apply sysctl params without reboot
+  sudo sysctl --system
+  ```
+- **Step:3 `Disable Swap`**
+  ```bash
+  # Disable swapping temporarily
+  sudo swapoff -a
+
+  # Disable swapping permanently
+  sudo sed -i '/ swap / s/^/#/' /etc/fstab
+  ```
+- **Step:4 `Open Required Ports`**
+  - [Refer Here](https://kubernetes.io/docs/reference/networking/ports-and-protocols/) for the Official docs.
+  - **Required Ports:**
+    - **Control Plane Node(s):**
+      - 6443 → Kubernetes API Server
+      - 2379-2380 → etcd server client API
+      - 10250 → Kubelet API
+      - 10259 → kube-scheduler
+      - 10257 → kube-controller-manager
+    - **Worker Node(s):**
+      - 10250 → Kubelet API
+      - 10256 → kube-proxy
+      - 30000–32767 → NodePort Services
+      - 8472 (UDP) → Flannel VXLAN
+        > All nodes can communicate Flannel overlay packets using **VXLAN (UDP 8472)**, which is required for pod-to-pod networking across different nodes.
+  - **Notes for Cloud VMs:**
+    - In **AWS**, update **Security Groups** to allow above ports.
+    - In **Azure**, update **Network Security Groups (NSG)**.
+    - In **GCP**, configure **Firewall Rules** in the VPC network.
+    - Use **inbound rules** for these ports on control plane and worker instances.
+- **Step:5 `Install Container Runtime (Containerd)`**
+  - Install `Containerd` as a Container Runtime.
+  - Install and configure prerequisites for `Containerd`.
+    ```bash
+    # Install containerd
+    sudo apt update
+    sudo apt install -y containerd
+
+    # Create default config
+    sudo mkdir -p /etc/containerd
+    containerd config default | sudo tee /etc/containerd/config.toml
+
+    # Show system cgroup driver
+    ps -p 1
+
+    # Use Systemd as cgroup driver
+    sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+
+    # Restart and enable containerd
+    sudo systemctl restart containerd
+    sudo systemctl enable containerd
+    ```
+- **Step:6 `Install Kubeadm, Kubelet & Kubectl`**
+  ```bash
+  # Update `apt` package index & Install needed packages
+  sudo apt-get update
+  sudo apt-get install -y apt-transport-https ca-certificates curl gpg
+
+  # Download the public signing key for the Kubernetes package repositories
+  curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+
+  # Add the appropriate Kubernetes `apt` repository
+  echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+  # Update the `apt` package index, install `kubelet`, `kubeadm` and `kubectl`
+  sudo apt-get update
+  sudo apt-get install -y kubelet kubeadm kubectl
+  sudo apt-mark hold kubelet kubeadm kubectl
+
+  # Enable the `kubelet` service
+  sudo systemctl enable --now kubelet
+  ```
+#### Step:2 `Initialize Control Plane (controlplane node only)`
+- [Refer Here](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/) for the Official docs.
+- **Step:1 `Initialize the Kubernetes Control Plane`**
+  ```bash
+  sudo kubeadm init --pod-network-cidr=10.244.0.0/16 --cri-socket unix:///run/containerd/containerd.sock --apiserver-advertise-address=<YOUR_CONTROL_PLANE_IP>
+  ```
+  - **Explanation:**
+    - `pod-network-cidr` → This defines the IP address range that will be used for pods in the cluster.(`Flannel` expects `10.244.0.0/16`)
+    - `cri-socket` → Tells `kubeadm` which container runtime socket to use.
+    - `apiserver-advertise-address` → Specifies the IP address the API server will use to communicate with other nodes.
+  - The `kubeadm init` command will give the output as shown below:
+    ```txt
+    Your Kubernetes control-plane has initialized successfully!
+
+    To start using your cluster, you need to run the following as a regular user:
+
+      mkdir -p $HOME/.kube
+      sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+      sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+    Alternatively, if you are the root user, you can run:
+
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+
+    You should now deploy a pod network to the cluster.
+    Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+      https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+    Then you can join any number of worker nodes by running the following on each as root:
+
+    kubeadm join 172.31.20.18:6443 --token zgtbgw.lnd0urv0cgqkd0b2 \
+            --discovery-token-ca-cert-hash sha256:355e14623fdca349af295d8c23cb7e948e91ca32b1cffcc2f258de0a84d49b1c
+    ```
+- **Step:2 `Set up kubectl`**
+  - Use the Commnads of `To start using your cluster, you need to run the following as a regular user`:
+    ```bash
+    mkdir -p $HOME/.kube
+    sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    sudo chown $(id -u):$(id -g) $HOME/.kube/config
+    ```
+- **Step:3 `Deploy a Pod Network to the Cluster (Install Flannel CNI)`**
+  - [Refer Here](https://kubernetes.io/docs/concepts/cluster-administration/addons/) for the Official docs.
+  - Use `Flanner` as a Pod Network.
+  - Click the link on `deploy a pod network to the cluster` and select `Flannel`.
+  - [Refer Here](https://github.com/flannel-io/flannel#deploying-flannel-manually) for the Flannel Official docs.
+  - Deploy `Flannel` with `kubectl`:
+    ```bash
+    kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+    ```
+    - If you use custom `podCIDR` (not `10.244.0.0/16`), you first need to download the above manifest and modify the network to match your one.
+  - `Flannel` enables communication between Pods across nodes.
+  - Verify all Pods should be in `Running` State.
+  ![preview](./Images/Kubernetes_CKA48.png)
+- **Step:5 `Join Worker Nodes (on each worker node)`**
+  - Join the Worker Nodes using join command:
+    ```bash
+    kubeadm join 172.31.20.18:6443 --token zgtbgw.lnd0urv0cgqkd0b2 \
+            --discovery-token-ca-cert-hash sha256:355e14623fdca349af295d8c23cb7e948e91ca32b1cffcc2f258de0a84d49b1c
+    ```
+  - Check the joined Nodes on **`ControlPlane`**:
+    ```bash
+    kubectl get nodes
+    ```
+    ![preview](./Images/Kubernetes_CKA49.png)
+#### Step:3 `Test Kubernetes Cluster with Deployment and Service`
+- **Create a Deployment:**
+  ```yaml
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: nginx-deployment
+  spec:
+    replicas: 1
+    selector:
+      matchLabels:
+        app: nginx
+    template:
+      metadata:
+        labels:
+          app: nginx
+      spec:
+        containers:
+        - name: nginx
+          image: nginx
+          ports:
+          - containerPort: 80
+  ```
+- **Exposes the Deployment using a NodePort Service:**
+  ```yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: nginx-service
+  spec:
+    selector:
+      app: nginx
+    type: NodePort
+    ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      nodePort: 30020  # You can change this to any port between 30000–32767
+  ```
+- **Apply the YAMLs:**
+  ```bash
+  kubectl apply -f nginx-deployment.yaml
+  kubectl apply -f nginx-service.yaml
+  ```
+- **Test the Application from Browser or Terminal:**
+  ```bash
+  http://<any-node-ip>:30020
+  ```
+  - You should see the NGINX welcome page.
+  ![preview](./Images/Kubernetes_CKA50.png)
+### Accessing kubeadm Kubernetes Cluster Remotely (e.g., from Windows laptop)
+#### Prerequisites
+- Kubernetes cluster set up using `kubeadm` on Linux VM (e.g., AWS EC2).
+- SSH access to the master node.
+- `kubectl` installed on remote machine (e.g., Windows/macOS/Linux).
+#### Steps
+- **Step:1 `Install kubectl on Windows`**
+  - Follow the official documentation to install `kubectl` on Windows.
+  - [Refer Here](https://kubernetes.io/docs/tasks/tools/install-kubectl-windows/) for the Official docs.
+  - You can `install kubectl` via the `binary method` or using `Chocolatey` (a package manager for Windows).
+  ![preview](./Images/Kubernetes_CKA51.png)
+- **Step:2 `Copy Kubeconfig File to Local Machine`**
+  - Locate the kubeconfig file on the master node:
+    - Default path: `/etc/kubernetes/admin.conf`
+  - SSH into the ControlPlane EC2 instance and Copy the `default kubeconfig` file to your home directory and gives your user permission to read it.
+    ```bash
+    sudo cp /etc/kubernetes/admin.conf /home/ubuntu/
+    sudo chown ubuntu:ubuntu /home/ubuntu/admin.conf
+    ```
+  - Then back on Windows terminal and Copy to local machine using `scp` or `WinSCP`:
+    ```bash
+    scp -i <key.pem> ubuntu@<public-ip>:/home/ubuntu/admin.conf C:\Users\YourName\.kube\config
+    ```
+  - If you don’t have `.kube` directory, create it first:
+    ```powershell
+    mkdir C:\Users\YourName\.kube
+    ```
+- **Step:3 `Update 'config' file (on local machine)`**
+  - Edit the `config` file on your local machine.
+    - Find the `server` entry under `clusters.cluster.server`:
+      ```yaml
+      server: https://<controlplane_private-ip>:6443
+      ```
+    - Change it to use the public IP:
+      ```yaml
+      server: https://<controlplane_public-ip>:6443
+      ```
+- **Step:4 `Ensure API Server is Reachable`**
+  1. `Open port 6443` in your EC2 security group for the public IP or your local machine's IP.
+  2. **Optional:** Check the kube-apiserver manifest file to ensure the advertise and bind addresses are correctly configured.
+     - File: `/etc/kubernetes/manifests/kube-apiserver.yaml`
+     - Ensure the following flags are set:
+       ```yaml
+       - --advertise-address=<controlplane_private-ip>
+       - --bind-address=0.0.0.0  # Ensures API server listens on all interfaces
+       ```
+       - Explanation:
+          1. `--advertise-address` can remain as the private IP of the node.
+          2. `--bind-address=0.0.0.0` ensures the API server listens on all interfaces (including public IP).
+             > If `--bind-address` is missing or set to `127.0.0.1`, **remote access will not work**.
+- **Step:5 `Test Access`**
+  ```bash
+  kubectl get nodes -o wide
+  kubectl get pods -A
+  ```
+#### Troubleshooting
+- If you encounter an error when running `kubectl get nodes -o wide` like:
+  ```vbnet
+  tls: failed to verify certificate: x509: certificate is valid for 10.96.0.1, 172.31.20.18, not <public-ip>
+  ```
+  ![preview](./Images/Kubernetes_CKA52.png)
+- **Follow these Steps to Resolve:**
+  1. **`Reconfigure the API Server with Correct SANs`**
+     - **Step:1** Regenerate the API server certificate to include the public IP (e.g., `54.160.216.184`).
+     - **Step:2** Edit or Create the `kubeadm` config file
+       ```bash
+       sudo vi kubeadm-config.yaml
+       ```
+     - **Step:3** Use the below config as a base (replace the IPs accordingly)
+       ```yaml
+       apiVersion: kubeadm.k8s.io/v1beta3
+       kind: ClusterConfiguration
+       kubernetesVersion: stable
+       controlPlaneEndpoint: "54.160.216.184:6443"  # Use Public IP
+       apiServer:
+         certSANs:
+         - 127.0.0.1
+         - 172.31.20.18       # Private IP
+         - 54.160.216.184     # Public IP
+         - localhost
+         - kubernetes
+         - kubernetes.default
+         - kubernetes.default.svc
+         - kubernetes.default.svc.cluster.local
+       ```
+     - **Step:4** Back up the existing certs (optional but good practice)
+       ```bash
+       sudo mv /etc/kubernetes/pki/apiserver.crt /etc/kubernetes/pki/apiserver.crt.bak
+       sudo mv /etc/kubernetes/pki/apiserver.key /etc/kubernetes/pki/apiserver.key.bak
+       ```
+     - **Step:5** Regenerate certificates
+       ```bash
+       sudo kubeadm init phase certs all --config=./kubeadm-config.yaml
+       ```
+     - **Step:6** If you get warning about the deprecated `v1beta3` API in your `kubeadm-config.yaml` like below
+     ![preview](./Images/Kubernetes_CKA53.png)
+       - This can be resolved using below command. This will generate a new version of the config file with the latest supported API version.
+         ```bash
+         kubeadm config migrate --old-config kubeadm-config.yaml --new-config kubeadm-config-new.yaml
+         ```
+     - **Step:7** Restart kubelet to apply the new cert:
+       ```bash
+       sudo systemctl restart kubelet
+       ```
+     - **Step:8** Copy the updated **`admin.conf`** to your local system again.
+       ```bash
+       sudo cp /etc/kubernetes/admin.conf /home/ubuntu/
+       sudo chown ubuntu:ubuntu /home/ubuntu/admin.conf
+       scp -i <key.pem> ubuntu@<public-ip>:/home/ubuntu/admin.conf C:\Users\YourName\.kube\config
+       ```
+     - **Step:9** Update the `server` block of the `config` file on your local machine to use the public IP.
+  2. **`Test Access`**
+     ```bash
+     kubectl get nodes -o wide
+     kubectl get pods -A
+     ```
+  ![preview](./Images/Kubernetes_CKA54.png)
