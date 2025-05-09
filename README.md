@@ -6782,3 +6782,371 @@ spec:
      kubectl get pods -A
      ```
   ![preview](./Images/Kubernetes_CKA54.png)
+
+
+# <p align="center">Helm</p>
+
+## Helm - Kubernetes Package Manager
+- Helm is a **package manager for Kubernetes**, like `apt` or `yum` for Linux.
+- It helps manage **complex apps** made of multiple Kubernetes objects (Deployments, Services, PVCs, Secrets, etc.).
+- Helm groups all these resources into **a single unit called a chart** (like an app bundle).
+### Problem Without Helm
+- Apps need many YAML files: e.g., WordPress needs Deployment, PV, PVC, Service, Secret, etc.
+- Applying them with `kubectl` is **manual and repetitive**.
+- **Customization** means editing many files (e.g., increase PV from 20 GB to 100 GB).
+- **Upgrading** or **deleting** the app requires knowing and editing/removing each object separately.
+- Even putting all objects into a single YAML makes it hard to **find and update specific parts**.
+### Use of Helm
+- Treats the app as **one unit**, not just many YAMLs.
+- Like a game installer: handles many files for you.
+- You install the app using a **single command** (`helm install`).
+- You can **customize settings** in one place (`values.yaml`).
+- **Upgrade** apps easily using `helm upgrade`.
+- **Rollback** to previous versions using `helm rollback`.
+- **Uninstall** with `helm uninstall` — Helm knows which resources to delete.
+### Key Helm Features
+- **Package Management** → Like apt/yum/npm but for Kubernetes
+- **Single Command Install** → `helm install` creates all resources
+- **Custom Configs** → Use `values.yaml` to set app-specific values like storage, password, etc.
+- **Upgrade Support** → `helm upgrade` changes only what’s needed
+- **Rollback Support** → `helm rollback` reverts to previous version
+- **Easy Uninstall** → `helm uninstall` removes all app-related objects
+- **Release Tracking** → Helm keeps history of every release (install/upgrade/rollback)
+### Values.yaml
+- Used to define app settings in one place
+- Avoids editing many different YAMLs
+- Example settings:
+  - Volume size
+  - Website name
+  - Admin password
+  - DB engine configs
+
+## Install Helm
+### Pre-requisites
+- Before installing Helm:
+  - A working **Kubernetes cluster** must be available.
+  - `kubectl` must be:
+    - Installed
+    - Configured to point to the right cluster using `kubeconfig` file
+### Supported OS
+- Helm can be installed on:
+  - Linux
+  - macOS
+  - Windows
+### Install Helm
+- [Refer Here](https://helm.sh/docs/intro/install/) for the Official docs.
+- Follow the official documentation to install `helm` based on OS.
+
+## Helm 2 vs Helm 3
+### Helm History
+- **Helm 1** → Release Date `Feb 2016`
+- **Helm 2** → Release Date `Nov 2016`
+- **Helm 3** → Release Date `Nov 2019`
+### Major Differences Between Helm 2 and Helm 3
+#### Tiller Removed in Helm 3
+- **Helm 2** required a component called **Tiller** to run inside the cluster.
+  - Helm CLI → Tiller → Kubernetes
+  - Tiller had **full permissions** (security risk).
+- **Helm 3** removed Tiller:
+  - Helm CLI communicates **directly** with Kubernetes.
+  - Uses Kubernetes **RBAC** for access control.
+  - More secure and simpler.
+#### Improved Security with RBAC
+- In **Helm 2**, Tiller had "God mode" access.
+- In **Helm 3**, user permissions are handled using **Kubernetes RBAC** directly.
+- Helm actions now respect the **same RBAC rules** as `kubectl`.
+#### Three-Way Strategic Merge Patch
+- Helm 3 uses a smarter diff/merge method during:
+  - **Upgrades**
+  - **Rollbacks**
+- **Rollback Example:**
+  1. **Revision 1**: Install WordPress 4.8 with Helm.
+  2. Manually update image to 5.8 using `kubectl` (not tracked by Helm).
+  3. Try rollback with:
+     - **Helm 2**: No effect (ignores manual changes).
+     - **Helm 3**: Detects live state ≠ old revision → correctly reverts to 4.8
+- **It compares:**
+  - **Helm 2** → Old chart vs New chart
+  - **Helm 3** → Old chart vs New chart vs **Live state**
+#### Revisions and Snapshots
+- Helm tracks **revisions** like snapshots:
+  - `helm install` → Revision 1
+  - `helm upgrade` → Revision 2
+  - `helm rollback` → Revision 3
+- Each Helm action (install, upgrade, rollback) creates a **new revision**.
+#### Smarter Upgrades in Helm 3
+- In Helm 2:
+  - Manual changes to resources (e.g. using `kubectl`) were **lost** on upgrade.
+- In Helm 3:
+  - Helm checks **live state** too.
+  - Preserves manual changes during **upgrades**.
+
+## Helm Components
+### Helm Components Overview
+- **`Helm CLI`** → The command-line tool to manage charts, releases, upgrades, rollbacks, etc.
+- **`Chart`** → A **collection of YAML files** that define Kubernetes resources for an app.
+- **`Release`** → A **deployed instance** of a chart in your cluster.
+- **`Revision`** → A **version of a release**; created when changes are made (like upgrade or config change).
+- **`values.yaml`** → File where you define configuration values (like image, replicas, ports).
+- **`Repository`** → A place to **store and share charts** (e.g., Bitnami, Artifact Hub).
+- **`Metadata`** → Helm stores release info (history, state) as **Kubernetes secrets** inside the cluster.
+### Helm Charts
+- A **Helm chart = app template**.
+- It contains:
+  - `templates/`: YAML templates for Kubernetes resources.
+  - `values.yaml`: default config values for the templates.
+  - `Chart.yaml`: chart metadata (name, version, etc.).
+- Example:
+  - `values.yaml:`
+    ```yaml
+    # values.yaml
+    image: nginx
+    replicaCount: 2
+    ```
+  - `deployment.yaml:`
+    ```yaml
+    # deployment.yaml (template uses above values)
+    spec:
+      replicas: {{ .Values.replicaCount }}
+      containers:
+        - image: {{ .Values.image }}
+    ```
+### Helm Releases
+- Running `helm install <release-name> <chart>` creates a **release**.
+- Example:
+  ```bash
+  helm install my-site bitnami/wordpress
+  ```
+- You can create **multiple releases** from the same chart:
+  ```bash
+  helm install my-second-site bitnami/wordpress
+  ```
+- Each release is tracked separately — great for having **dev, test, and prod** environments.
+### Helm Repositories
+- Charts are available from public repos (like Bitnami, AppsCode, TrueCharts).
+- **Artifact Hub (artifacthub.io)** is the central place to search for charts.
+  - [Refer Here](https://artifacthub.io/) for the Official site.
+  - Look for **verified publishers** for trusted charts.
+### Helm Metadata Storage
+- Helm stores release data (versions, status, values, etc.) as **Kubernetes secrets**.
+- This allows:
+  - Easy collaboration across teams.
+  - Persistent state across sessions and machines.
+
+## Helm Chart
+- A **Helm Chart** is a **collection of YAML files** that define a Kubernetes application.
+- It acts like an **instruction manual** that Helm uses to:
+  - Deploy apps
+  - Apply configurations
+  - Manage upgrades and rollbacks
+### Basic Structure of a Helm Chart
+- Structure of a Helm Chart:
+  ```text
+  mychart/
+  ├── Chart.yaml         # Metadata about the chart
+  ├── values.yaml        # Default config values (used in templates)
+  ├── templates/         # Kubernetes manifest templates
+  ├── charts/            # (Optional) Subcharts/dependencies
+  ├── README.md          # (Optional) Info about the chart
+  ├── LICENSE            # (Optional) License info
+  ```
+### Chart.yaml
+- Metadata about the chart:
+  - `apiVersion`: Chart API version → `v2` for Helm 3
+  - `name`: Name of the chart (e.g., `wordpress`)
+  - `version`: Version of the chart itself (not the app)
+  - `appVersion`: Version of the application (e.g., WordPress 6.0)
+  - `description`: Description of what the chart does
+  - `type`: `application` (default) or `library`
+  - `dependencies`: Define other charts used (e.g., MariaDB)
+  - `maintainers`: List of people maintaining the chart
+  - `home`: URL to project homepage
+  - `icon`: URL to project logo
+  - `keywords`: Useful for searching charts in repos
+- **Note:** Always use `apiVersion: v2` for new charts (Helm 3).
+### values.yaml
+- Contains **default values** used in templates.
+- Allows **customization** without editing templates directly.
+- Example:
+  ```yaml
+  replicaCount: 2
+  image:
+    repository: nginx
+    tag: latest
+  ```
+### Templating in Helm
+- Templates use Go templating syntax.
+- Values from `values.yaml` are injected dynamically.
+- Example in a template:
+  ```yaml
+  replicas: {{ .Values.replicaCount }}
+  image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+  ```
+### Chart Dependencies
+- Used to **include other charts** (e.g., MariaDB) without copying manifests.
+- Defined under `dependencies` in `Chart.yaml`.
+- Useful for **multi-tier applications**.
+### Chart Types
+1. **application** – standard app chart (most charts)
+2. **library** – reusable chart components for other charts (like shared code)
+
+## Helm CLI Basics
+- Use `helm` command to access the CLI.
+- To see help menu:
+  ```
+  helm help
+  ```
+  - Use it to explore commands and usage info quickly.
+- **Example:**
+  - To rollback a release (after a failed upgrade):
+    ```
+    helm rollback <release-name> <revision>
+    ```
+### Helm Help for Subcommands
+- You can get help on subcommands too:
+  ```
+  helm repo help
+  ```
+  - Shows how to:
+    - Add a repo: `helm repo add`
+    - List repos: `helm repo list`
+    - Remove a repo: `helm repo remove`
+### Finding Charts
+#### Method:1 `Using Artifact Hub (GUI)`
+- [Refer Here](https://artifacthub.io/) for the Official artifacthub.io site.
+- Search for a chart (e.g., WordPress).
+- Look for **"official"** or **"verified publisher"** badge.
+- Page shows:
+  - Install commands
+  - Used components
+  - Configurable values
+#### Method:2 `From Command Line`
+- Use:
+  ```
+  helm search hub wordpress
+  ```
+  - `hub` searches in [artifacthub.io](https://artifacthub.io)
+- Or search in a specific repo:
+  ```
+  helm search repo wordpress
+  ```
+### Installing a Chart (e.g., WordPress)
+1. **Add the repo:**
+   ```
+   helm repo add bitnami https://charts.bitnami.com/bitnami
+   ```
+2. **Install chart:**
+   ```
+   helm install my-release bitnami/wordpress
+   ```
+   - `my-release` is the name you give this instance.
+   - Helm installs as a **release**.
+### Viewing Releases
+- To list all releases:
+  ```
+  helm list
+  ```
+### Uninstalling a Release
+- To remove the app and all its Kubernetes resources:
+  ```
+  helm uninstall my-release
+  ```
+### Updating Repo Info
+- Like `apt update` on Linux:
+  ```
+  helm repo update
+  ```
+  - Refreshes local copy of chart metadata.
+
+## Customizing Helm Chart Parameters
+- By default, Helm installs a chart with default values (from `values.yaml`), which may not suit your requirements (e.g., WordPress blog name = “User’s Blog”).
+### Ways to Customize Helm Chart Values
+#### 1. Using `--set` in CLI
+- Override values from `values.yaml` directly in the `helm install` command:
+  ```bash
+  helm install mywp bitnami/wordpress \
+    --set wordpressBlogName="Helm Tutorials" \
+    --set wordpressEmail="john@example.com"
+  ```
+- Use multiple `--set` flags for multiple overrides.
+#### 2. Using a Custom YAML File
+- Create your own `custom-values.yaml` file:
+  ```yaml
+  wordpressBlogName: Helm Tutorials
+  wordpressEmail: john@example.com
+  ```
+- Then use `--values` (or `-f`) option:
+  ```bash
+  helm install mywp bitnami/wordpress -f custom-values.yaml
+  ```
+- Good for **many parameters** or **version control**.
+#### 3. Modify Original Chart (Advanced)
+- Pull and extract chart locally to modify files directly:
+  ```bash
+  helm pull bitnami/wordpress --untar
+  ```
+- This creates a `wordpress/` folder with all chart files including `values.yaml`.
+- Edit `values.yaml` as needed using a text editor.
+- Then install from local path:
+  ```bash
+  helm install mywp ./wordpress
+  ```
+
+## Helm Lifecycle Management
+- Helm helps manage the **entire lifecycle** of an app: **install → upgrade → rollback → uninstall**.
+- Each time you install a chart, a **release** is created.
+  - A **release** = a versioned deployment of chart-managed K8s objects.
+- Helm tracks what resources belong to each release (pods, services, secrets, etc.).
+### Installing a Specific Chart Version
+- You can install a specific version using:
+  ```bash
+  helm install nginx-release nginx-stable/nginx --version 1.19.2
+  ```
+### Upgrading a Release
+- Helm upgrades all objects in the release at once.
+  ```bash
+  helm upgrade nginx-release nginx-stable/nginx --version 1.21.4
+  ```
+- This creates **Revision 2** (replacing Revision 1).
+- Old pod is deleted, new one is created.
+- **Check version:**
+  ```bash
+  kubectl get pods
+  kubectl describe pod <pod-name>  # Check image version
+  ```
+### Helm Revision History
+- Helm creates a **new revision** each time you install/upgrade/rollback.
+- Run to check revision:
+  ```bash
+  helm list                # Show all current releases
+  helm history nginx-release  # Shows full revision history
+  ```
+- History includes:
+  - Revision number
+  - Chart version
+  - App version
+  - Action (install/upgrade/rollback)
+  - Description
+### Rollback a Release
+- If upgrade causes issues:
+  ```bash
+  helm rollback nginx-release 1
+  ```
+- This creates a new **Revision 3** with the config of Revision 1.
+- It does **not go back to Revision 1**, but **creates a new revision**.
+- Think of rollback as a **"restore from backup"** of manifest/config files.
+### Limitations of Helm Rollback
+- Helm only rolls back **Kubernetes manifests** (YAML objects).
+- It **does NOT restore**:
+  - File data
+  - Volume contents
+  - External database contents
+- **Example:** Rollback of a MySQL Helm chart **won’t restore the DB data**, just the pod definitions.
+### Upgrades May Require Extra Permissions
+- Example: **WordPress upgrade** might fail if:
+  - No admin DB password provided
+  - Missing values required for internal upgrades
+- Use extra flags/values if necessary for such charts.
+### Helm + Backups = Use Chart Hooks (later in course)
+- Use **Helm chart hooks** to automate backups before upgrade.
+- Useful for apps with **persistent volumes or external DBs**.
