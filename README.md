@@ -7189,55 +7189,6 @@ spec:
          staging/kustomization.yaml
          prod/kustomization.yaml
        ```
-- **Folder Structure:**
-  ```
-  .
-  ├── base
-  │   ├── deployment.yaml
-  │   └── kustomization.yaml
-  └── overlays
-      ├── dev
-      │   └── kustomization.yaml
-      ├── staging
-      │   └── kustomization.yaml
-      └── prod
-          └── kustomization.yaml
-  ```
-#### Example
-- **`base/deployment.yaml:`**
-  ```yaml
-  apiVersion: apps/v1
-  kind: Deployment
-  metadata:
-    name: nginx
-  spec:
-    replicas: 1  # default
-    template:
-      spec:
-        containers:
-          - name: nginx
-            image: nginx
-  ```
-- **`overlays/staging/kustomization.yaml:`**
-  ```yaml
-  resources:
-    - ../../base
-  patchesStrategicMerge:
-    - deployment-patch.yaml
-  ```
-- **`overlays/staging/deployment-patch.yaml:`**
-  ```yaml
-  apiVersion: apps/v1
-  kind: Deployment
-  metadata:
-    name: nginx
-  spec:
-    replicas: 3
-  ```
-- **Apply Kustomize:**
-  ```bash
-  kubectl apply -k overlays/staging/
-  ```
 #### Use of Kustomize
 - Avoids **file duplication**
 - Uses **plain YAML** (no templating like Helm)
@@ -8005,3 +7956,231 @@ project/
 - When a **feature is optional**
 - When it's used by **only some overlays**
 - When you want **clean and reusable** configs
+
+
+# <p align="center">Kubernetes Troubleshooting</p>
+
+## Application Failures
+- [Refer Here](https://kubernetes.io/docs/tasks/debug/debug-application/) for the Official docs.
+- **Goal:** To **identify and resolve** application failures in a Kubernetes cluster (web services, pods, services, endpoints, etc.)
+### Step-by-Step Troubleshooting Approach
+- **Step-1 `Check Frontend Application/Service Status`**
+  - Run a `curl` command on NodePort/ClusterIP:
+    ```bash
+    curl <NodeIP>:<NodePort>
+    ```
+  - Verifies if the app is reachable via service.
+- **Step-2 `Inspect the Service Configuration`**
+  - Check it have endpoints:
+    ```bash
+    kubectl get endpoints web-service
+    ```
+  - If endpoints are empty:
+    - Service has no matching pods!
+    - Check if **selectors** in the Service match **labels** in the Pod
+      ```bash
+      kubectl describe svc web-service
+      kubectl get pods --show-labels
+      ```
+- **Step-3 `Check the Pod Status`**
+  ```bash
+  kubectl get pod web-pod
+  kubectl describe pod web-pod
+  ```
+  - Check for:
+    - Pod `status` (e.g., `CrashLoopBackOff`)
+    - Events (e.g., imagePullError, probe failures)
+    - Node scheduling issues
+- **Step-4 `View Pod Logs`**
+  ```bash
+  kubectl logs web-pod
+  ```
+  - If pod is restarting:
+    - Watch logs live:
+      ```bash
+      kubectl logs -f web-pod
+      ```
+    - Or check logs of previous container:
+      ```bash
+      kubectl logs --previous web-pod
+      ```
+
+## Control Plane Failure
+- [Refer Here](https://kubernetes.io/docs/tasks/debug/debug-cluster/) for the Official docs.
+- **Goal:** Learn how to **diagnose and fix issues** with **Control Plane components** like `kube-apiserver`, `kube-scheduler`, `controller-manager`, etc.
+### Key Concepts
+- Control Plane = **Brain** of Kubernetes
+- If **Control Plane fails**, cluster becomes unusable
+- Components may run:
+  - As **Pods** (if installed with `kubeadm`)
+  - Or as **systemd services**
+### Step-by-Step Troubleshooting Guide
+- **Step-1 `Check Node Status`**
+  ```bash
+  kubectl get nodes
+  ```
+  - Ensure all nodes (especially control plane node) are `Ready`
+- **Step-2 `Check Pod Status (if using kubeadm)`**
+  - Control plane components are run as **static pods** in kubeadm setups.
+  - Check if all pods in `kube-system` namespace are running:
+    ```bash
+    kubectl get pods -n kube-system
+    ```
+  - All system pods should be in `Running` or `Completed` state.
+  - Look for any `CrashLoopBackOff`, `Pending`, etc.
+- **Step-3 `Check Control Plane Services (if Not Pods)`**
+  - If components are **not running as pods**, they may be services (especially in custom/manual installs).
+  - Use `systemctl` to check services (usually on control plane node):
+    ```bash
+    service kube-apiserver status
+    service kube-controller-manager status
+    service kube-scheduler status
+    service kubelet status
+    ```
+  - You can also use:
+    ```bash
+    sudo systemctl status <component-name>
+    ```
+- **Step-4 `Check Logs of Components`**
+  - **If using `kubeadm` (static pod):**
+    - Use `kubectl logs`:
+      ```bash
+      kubectl logs -n kube-system <pod-name>
+      ```
+    - Use `kubectl describe pod <name>` for deeper insights
+  - **If services are running natively (not as pods):**
+    - Use **host OS logging tool**, e.g., `journalctl`:
+      ```bash
+      journalctl -u kube-apiserver
+      journalctl -u kube-controller-manager
+      journalctl -u kube-scheduler
+      ```
+
+## Worker Node Failure
+- **Goal:** Diagnose and fix problems when a **worker node** becomes `NotReady` or crashes.
+### Key Concepts
+- Worker node = Runs your **application pods**
+- If a worker fails:
+  - Pods running on it become **unavailable**
+  - Scheduler may **reschedule** them elsewhere (if replicas exist)
+### Troubleshooting Steps
+- **Step-1 `Check Node Status`**
+  ```bash
+  kubectl get nodes
+  ```
+  - Look for `NotReady` status
+  - Focus on affected **worker node(s)**
+- **Step-2 `Describe the Problematic Node`**
+  ```bash
+  kubectl describe node <node-name>
+  ```
+  - Look for:
+    - **`LastHeartbeatTime`**: Helps identify **when** the node became unreachable.
+    - **`Conditions`**: These flags indicate issues (Meaning if True)
+      1. `OutOfDisk` → Node is out of disk space
+      2. `MemoryPressure`	→ Node is low on memory
+      3. `DiskPressure` → Disk usage is too high
+      4. `PIDPressure` → Too many processes on the node
+      5. `Ready` → Should be `True` for healthy nodes
+      > If node stops communicating (crash/network issue), flags may show **Unknown**.
+- **Step-3 `Check Node from the OS Level`**
+  - If the node is offline or crashed, **bring it back up**.
+  - Check:
+    - **CPU usage**
+    - **Memory availability**
+    - **Disk space**
+- **Step-4 `Check kubelet Status`**
+  - On the affected node, ensure `kubelet` is **running**:
+    ```bash
+    service kubelet status
+            (Or)
+    sudo systemctl status kubelet
+    ```
+  - Check logs for detailed issues:
+    ```bash
+    sudo journalctl -u kubelet
+    ```
+    - Look for errors like:
+      1. `Failed to get node`
+      2. `Certificate expired`
+      3. `Out of memory`
+  - Kubelet Files Loaction for Troubleshoot:
+    - Main Configuration file: `/var/lib/kubelet/config.yaml`
+    - KubeConfig file: `/etc/kubernetes/kubelet.conf`
+- **Step-5 `Check kubelet Certificate (if TLS error)`**
+  ```bash
+  openssl x509 -in /var/lib/kubelet/<worker-node>.crt -text
+  ```
+  - Ensure:
+    - Cert is **not expired**
+    - Issuer is the correct **Kubernetes CA**
+    - Node name is correct in **Subject CN**
+### Common Worker Node Failure Reasons
+- Kubelet is **down** or **crashed**
+- Node is **out of resources**
+- **Certificate expired**
+- **Disk full** or **network issues**
+
+## Network Troubleshooting
+### 1. CNI (Container Network Interface) Plugins
+- Kubernetes uses **CNI plugins** for pod networking.
+- Popular CNI plugins:
+  - **Weave** → Supports Network Policies
+  - **Flannel** → Does NOT support Network Policies
+  - **Calico** → Most powerful. Supports Network Policies
+  > **Exam Tip:** If you’re asked to install a CNI plugin, the **exact URL will be provided**.
+- If multiple CNI configs exist, **kubelet picks the first alphabetically**.
+### 2. DNS in Kubernetes (CoreDNS)
+- Kubernetes uses **CoreDNS** for internal name resolution.
+- **CoreDNS listens on port 53 (DNS)**.
+- **CoreDNS components:**
+  - Deployment: `coredns`
+  - Service: `kube-dns`
+  - ConfigMap: `coredns`
+  - ClusterRoles & RoleBindings: `coredns`, `kube-dns`
+  - CoreDNS config is defined in `Corefile` (via ConfigMap).
+#### Troubleshooting CoreDNS Issues
+1. **CoreDNS Pods in `Pending` state**
+   - CNI plugin may be missing
+2. **CoreDNS in `CrashLoopBackOff`**
+   - SELinux or DNS loop issues
+3. **SELinux + old Docker**
+   - Upgrade Docker / Disable SELinux / allowPrivilegeEscalation
+4. **DNS loop issue**
+   - Use real resolv.conf via `resolvConf:` in kubelet config
+   - Or forward to fixed DNS like `8.8.8.8` in Corefile
+5. **kube-dns has `no endpoints`**
+   - Check service selectors and ports
+   - **Check CoreDNS service endpoints:** `kubectl -n kube-system get ep kube-dns`
+### 3. Kube-Proxy
+- Runs on **every node** as a **DaemonSet**.
+- Handles **traffic routing** from **Services to Pods**.
+- Works using **iptables** or **ipvs** mode.
+- **kube-proxy command inside kube-proxy Container:**
+  ```bash
+  Command:
+      /usr/local/bin/kube-proxy
+      --config=/var/lib/kube-proxy/config.conf
+      --hostname-override=$(NODE_NAME)
+  ```
+  - So it fetches the configuration from a configuration file ie, **`/var/lib/kube-proxy/config.conf`** and we can override the hostname with the node name of at which the pod is running.
+#### Troubleshooting `kube-proxy`
+- **Check if pod is running:** Check kube-proxy DaemonSet
+  ```bash
+  kubectl -n kube-system get pods -l k8s-app=kube-proxy
+  ```
+- **View logs:**
+  ```bash
+  kubectl -n kube-system logs ds/kube-proxy
+  ```
+- **Check configmap:**
+  ```bash
+  kubectl -n kube-system get configmap kube-proxy -o yaml
+  ```
+- **Verify running process:**
+  ```bash
+  netstat -plan | grep kube-proxy\
+  ```
+  - Common ports:
+    - `30000–32767`: NodePort range
+    - `10249`, `10256`: Health checks & metrics
