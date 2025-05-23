@@ -8184,3 +8184,251 @@ project/
   - Common ports:
     - `30000–32767`: NodePort range
     - `10249`, `10256`: Health checks & metrics
+
+
+# <p align="center">JSON PATH</p>
+
+## YAML Introduction
+- YAML = "YAML Ain’t Markup Language"
+- Human-readable data format used for configuration files.
+- Widely used in Kubernetes to define objects like Pods, Deployments, Services, etc.
+### Basic Rules of YAML
+- **Indentation:** Use **spaces only** (no tabs)
+- **Indentation Size:** Typically **2 spaces** (can use 4 but be consistent)
+- **Comments:** Use `#` for comments
+- **File Extension:** `.yaml` or `.yml`
+- **Structure:** Based on key-value pairs
+- **Data Types:** String, List/Array, Dictionary/Map
+### YAML Data Types with Examples
+1. **String (Key-Value Pair)**
+   ```yaml
+   name: kubernetes
+   version: "1.28"
+   environment: production
+   ```
+   - Key: `name`, Value: `kubernetes`
+   - Values can be quoted or unquoted.
+   - Quoting is necessary if the value has special characters, colons, or starts with `yes/no/on/off` to avoid interpretation as booleans.
+2. **List / Array (Ordered)**
+   ```yaml
+   colors:
+     - red
+     - green
+     - blue
+   ```
+   - This represents a list of values.
+   - Order **matters** (e.g., container order in a pod).
+   - List items start with a `-` and are indented under the key.
+3. **Dictionary / Map (Unordered)**
+   ```yaml
+   metadata:
+     name: mypod
+     namespace: default
+     labels:
+       app: frontend
+   ```
+   - A dictionary contains **key-value** pairs.
+   - Order **does not matter** (e.g., label order).
+   - Keys are indented under a parent key.
+4. **Dictionary with List**
+   ```yaml
+   containers:
+     - name: nginx
+       image: nginx:latest
+       ports:
+         - containerPort: 80
+     - name: sidecar
+       image: busybox
+       command: ["sleep", "3600"]
+   ```
+   - `containers` is a list of dictionaries (each dictionary is a container config).
+   - Used commonly in `spec.template.spec.containers` in Pod specs.
+5. **Dictionary with Dictionary**
+   ```yaml
+   metadata:
+     name: mypod
+     labels:
+       app: nginx
+       tier: frontend
+   ```
+   - `labels` is a dictionary nested inside another dictionary (`metadata`).
+   - Indentation shows hierarchy.
+### Important YAML Points
+- **YAML is sensitive to spaces**, not tabs.
+- **Dictionary/Map is unordered**, but **List/Array is ordered**.
+- Comments use `#` and are ignored during parsing.
+- Use consistent indentation (2 spaces is recommended).
+- Complex Kubernetes objects use **combinations** of strings, lists, and dictionaries.
+
+## YAML vs JSON
+- YAML uses **indentation** to define structure and JSON uses **braces `{}`** and **brackets `[]`**
+- YAML list items start with `-` and JSON list items are inside `[]` & separated by commas `,`
+- YAML is more **human-readable** and JSON is more **machine-readable**
+- Easy to convert between formats. Use [https://json2yaml.com](https://json2yaml.com)
+
+## JSON PATH Introduction
+- **JSONPath** is a **query language** for JSON/YAML – similar to SQL (Structured Query Language) for databases.
+- It helps **extract specific data** from JSON/YAML files.
+- Works on **key-value pairs** and **arrays**.
+### JSONPath Syntax
+#### 1. Root Element (`$`)
+- Represents the **top-level** of the document.
+- Always start your query with `$`.
+- Example:
+  ```bash
+  $.car
+  # selects the whole `car` dictionary
+  $.vehicles.car
+  # selects `car` inside `vehicles`
+  ```
+#### 2. Dot Notation (`.`)
+- Used to **access nested fields** (like object.property in programming)
+- Example:
+  - `$.car.color` - accesses the color of car
+  - `$.car.engine.type` - accesses engine type
+#### 3. Lists (Arrays) (`[]`)
+- Indexing starts from **0**
+- Use `[index]` to get a specific item
+- Example:
+  - `$[0]` - first item in the root array
+  - `$.car.wheels[1].model` - second wheel’s model in `car.wheels` array
+#### 4. Filters / Criteria (`?(@ <condition>)`)
+- Use to filter items in a list based on condition
+- Syntax:
+  - `$[?(@ > 40)]` – all values > 40
+  - `$[?(@ == 10)]` – values equal to 10
+- Advanced Example:
+  - `$.car.wheels[?(@.location == "real-right")].model` - Get the model of the wheel where location is `"real-right"`
+- **Supported Operators:**
+  - `==` → equal to
+  - `!=` → not equal
+  - `>` / `<` / `>=` / `<=` → comparisons
+  - `in [x, y]` → check inclusion
+  - `nin [x, y]` → check exclusion
+
+## JSONPath – Wildcards
+- **Wildcards** are used in JSONPath when you want to **select all items** at a certain level without knowing their exact names or indexes.
+### Wildcard `*` – Match Everything
+- `*` selects **all elements** at that level — keys in a dictionary or items in a list.
+- Commonly used with `.` or `[]`.
+- **Examples:**
+  - **Dictionary Wildcard:**
+    ```json
+    {
+      "car": {
+        "color": "red",
+        "model": "sedan",
+        "year": 2020
+      }
+    }
+    ```
+    - Query: `$.car.*`
+      ➜ Returns all values in the `car` dictionary → `"red", "sedan", 2020`
+  - **List Wildcard:**
+    ```json
+    {
+      "cars": [
+        { "model": "sedan" },
+        { "model": "suv" },
+        { "model": "hatchback" }
+      ]
+    }
+    ```
+    - Query: `$.cars[*].model`
+      ➜ Returns all `model` values in the list → `"sedan", "suv", "hatchback"`
+### When to Use Wildcards
+- When you **don’t know keys or indexes** but want to extract all values at that level.
+- Useful in commands like:
+  ```bash
+  kubectl get pods -o jsonpath="{.items[*].metadata.name}"
+  # Gets the names of all pods.
+  ```
+
+## JSONPath – Lists
+- **JSON lists** are arrays represented using square brackets `[]`.
+- JSONPath helps you extract specific items or ranges from these lists using indexing and slicing.
+### Basic Indexing
+- `$[0]` → Get **1st item** (Index starts from 0)
+- `$[3]` → Get **4th item** (4th item is at index 3)
+- `$[0,3]` → Get **1st and 4th items** (Use comma to select multiple items)
+### Slicing (Ranges)
+- `$[0:4]` → Get **1st to 4th items** (Includes index 0 to 3 (4 is excluded))
+- `$[0:3]` → Get **1st to 3rd items** (Only includes 0,1,2 (excludes 3))
+### Step Over Items (Skip Items)
+- `$[0:8:2]` → Get every **2nd item** from index 0 to 7 (Picks 0,2,4,6 (step = 2))
+### Getting Items from the End
+- `$[-1:]` → Get **last item** (Negative index = from the end)
+- `$[-3:]` → Get **last 3 items** (Gets last 3 elements from the list)
+
+## JSONPath in `kubectl`
+- `kubectl` communicates with the **Kubernetes API Server**, which returns data in **JSON format**.
+- The CLI **hides many details** to make output readable.
+- Use JSONPath to **extract, format, and customize** the output as needed (like reports or summaries).
+- Helpful when:
+  - You need only specific fields (e.g., CPU count, image names).
+  - You want **tabular** or **custom formatted** data.
+  - You want to **sort** results by any specific value.
+### Steps to Use JSONPath
+1. **Run Basic Command:**
+   ```bash
+   kubectl get pods
+   ```
+2. **View Full JSON Output:**
+   ```bash
+   kubectl get pods -o json
+   ```
+3. **Identify the JSONPath:** Get image name
+   ```bash
+   .items[0].spec.containers[0].image
+   ```
+   > `$` is optional in kubectl.
+4. **Apply JSONPath:**
+   ```bash
+   kubectl get pods -o=jsonpath='{.items[0].spec.containers[0].image}'
+   ```
+### Combine Multiple JSONPath Fields
+- You can combine two or more JSONPath expressions.
+  ```bash
+  kubectl get nodes -o=jsonpath='{.items[*].metadata.name}{.items[*].status.capacity.cpu}'
+  ```
+- **Output:**
+  - All node names **followed by** all CPU capacities — not formatted well.
+  - To fix formatting, use `\t` (tab) and `\n` (newline).
+### Format Output Nicely
+- Use escape characters:
+  - `\n` → New line
+  - `\t` → Tab space
+- **Example:**
+  ```bash
+  kubectl get nodes -o=jsonpath='{.items[*].metadata.name}{"\n"}'
+  ```
+### Loop with `range` and `end`
+- To iterate through items in JSON and format output:
+  ```bash
+  kubectl get nodes -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.capacity.cpu}{"\n"}{end}'
+  ```
+- **Output:** Node name and CPU count shown in **table format**.
+  ```
+  node1    2
+  node2    4
+  ```
+### Use Custom Columns (Simpler Alternative)
+- Instead of writing long JSONPath loops, you can define custom columns.
+- **Syntax:** `kubectl get nodes -o=custom-columns=<Column-Name>:<JSON-Path>`
+- **Example:**
+  ```bash
+  kubectl get nodes -o=custom-columns=NODE:.metadata.name,CPU:.status.capacity.cpu
+  ```
+- **Output:** Easier, cleaner, and readable.
+  ```
+  NODE     CPU
+  node1    2
+  node2    4
+  ```
+### Sort with JSONPath
+- You can **sort the output** based on any field in the JSON structure:
+  ```bash
+  kubectl get nodes --sort-by=.metadata.name
+  kubectl get nodes --sort-by=.status.capacity.cpu
+  ```
+- Sorts output **alphabetically** or by **CPU value**.
