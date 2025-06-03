@@ -1431,6 +1431,59 @@
   - Control plane needed
   - **Use case:** Deploying agents/loggers on all nodes
 
+## Kubernetes Priority Classes
+- Priority classes define **priority levels** for Pods.
+- Helps ensure **important workloads (e.g., control plane, critical apps)** are scheduled before less important ones (e.g., background jobs).
+- **Use of Priority Classes:**
+  - To **guarantee scheduling** for critical workloads.
+  - When resources are limited, **low-priority pods can be evicted** to make room for high-priority ones.
+- **Key Points:**
+  - Available across all namespaces.
+  - **Priority Value Range** is `-2,000,000,000` to `+1,000,000,000` for user pods. System-critical pods (like control plane) can have values **up to `+2,000,000,000`**.
+  - **Higher Number = Higher Priority**
+  - **Default Pod Priority:** If no priorityClass is set → priority is `0`.
+### PriorityClass YAML Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `PriorityClass`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#priorityclass-v1-scheduling-k8s-io) for the **PriorityClass Metadata APIs**.
+  - Based on **PriorityClass Metadata APIs** write YAML file:
+    ```yaml
+    apiVersion: scheduling.k8s.io/v1
+    kind: PriorityClass
+    metadata:
+      name: high-priority
+    value: 1000
+    globalDefault: false       # Only one PriorityClass can have this as true
+    description: "High priority workloads"
+    ```
+- Use `priorityClassName` in Pod YAML to apply:
+  ```yaml
+  spec:
+    priorityClassName: high-priority
+  ```
+- **Commands:**
+  ```bash
+  kubectl apply -f priorityclass.yaml
+  # Create a PriorityClass
+  kubectl get priorityclasses
+  # View all PriorityClasses
+  kubectl describe priorityclass high-priority
+  # Describe a class
+  ```
+### Setting a Global Default
+- Add `globalDefault: true` in one PriorityClass to make it default.
+- Only **one** PriorityClass can be default in the entire cluster.
+### Preemption Policy
+- **`preemptionPolicy:`** Controls whether higher-priority pods can evict lower-priority pods.
+- **`Default`** – `PreemptLowerPriority` can evict lower-priority pods.
+- `Never` (Optional) – `PreemptLowerPriority` will **not evict** pods, just **waits in the queue**.
+- **Example Scenario:**
+  - **`Pod:A`** – **`Priority Value:7`** → Scheduled first (high priority)
+  - **`Pod:B`** – **`Priority Value:5`** → Scheduled if resources are free
+  - **`Pod:C (new)`** – **`Priority Value:6`** → If no space.
+    - **`PreemptionPolicy`** = `default` → evicts `Pod:B`
+    - **`PreemptionPolicy`** = `Never` → waits in queue
+
 ## Multiple Schedulers in Kubernetes
 - [Refer Here](https://kubernetes.io/docs/tasks/extend-kubernetes/configure-multiple-schedulers/) for the Official docs.
 - **Scheduler:**
@@ -8648,3 +8701,101 @@ DEPLOYMENT          CONTAINER_IMAGE          READY_REPLICAS          NAMESPACE
 ##### 14. Identify the starting pod CIDR network of the Kubernetes cluster. This information is crucial for configuring the CNI plugin during installation. Output the pod CIDR network to a file at `/root/pod-cidr.txt`.
 - The PodCIDR is available in the `controlplane` node. Retrieve the `controlplane` node output in YAML format using the command: `kubectl get nodes controlplane -o yaml | more`.
 - From the YAML output, find out the PodCIDR using JSONPATH and save it to the file `/root/pod-cidr.txt`.
+
+
+
+# <p align="center"> Certified Kubernetes Application Developer (CKAD)</p>
+
+
+# <p align="center">Observability</p>
+
+## Readiness and Liveness Probes
+### Pod Lifecycle Basics
+- **Pod Status** can be:
+  - `Pending` – Pod is created, scheduler searching for a node.
+  - `ContainerCreating` – Images pulled, containers starting.
+  - `Running` – All containers are up.
+  - `Succeeded/Failed` – App finishes or crashes.
+- Use:
+  ```bash
+  kubectl get pods
+  kubectl describe pod <pod-name>
+  ```
+- **Pod Conditions** (inside `kubectl describe pod`):
+  - `PodScheduled`: True when scheduled to a node.
+  - `Initialized`: Init containers done.
+  - `ContainersReady`: All containers ready.
+  - `Ready`: Pod is ready to serve traffic.
+### Readiness Probes
+- **Used to decide if pod is ready to receive traffic.**
+- Without it: Kubernetes assumes container is ready **immediately** after starting → might forward traffic too early.
+- Fix: Add `readinessProbe` so Kubernetes only routes traffic when **app is truly ready**.
+- **Common Readiness Probe Configs:**
+  ```yaml
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 3
+  ```
+- **Types of probes**:
+  - `httpGet` – Call endpoint (e.g., `/health`)
+  - `tcpSocket` – Check if port is listening
+  - `exec` – Run a custom command inside the container
+#### Example Use Case
+- A slow-starting app (e.g., Jenkins) takes time to be ready.
+- Without readiness probe: traffic is sent too soon.
+- With readiness probe: traffic waits until app is fully ready.
+- **Best Practice:** Use readiness probes in Deployments/ReplicaSets to **avoid serving traffic** to unready pods during scaling or rollouts.
+### Liveness Probes
+- **Used to check if the app is still alive and responsive**.
+- If probe fails → Kubernetes restarts the container.
+- **Need of Liveness Probes:**
+  - A container might be "running" (from K8s point of view), but app inside could be:
+    - Stuck (e.g., infinite loop)
+    - Crashed silently (no external error)
+- **Liveness Probe Config Example:**
+  ```yaml
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8080
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 3
+  ```
+- Same options as readiness:
+  - `httpGet`, `tcpSocket`, `exec`
+  - Delay, frequency, thresholds
+### Probe Parameters (Common for both)
+- **`initialDelaySeconds`** Wait before first probe
+- **`periodSeconds`** How often to run the probe
+- **`timeoutSeconds`** Timeout for each probe
+- **`successThreshold`** Minimum consecutive successes for success
+- **`failureThreshold`** Failures before marking as failed/unhealthy
+### Practice Tips
+- Test readiness on apps with slow start (e.g., `Node.js`, `Jenkins`, `MySQL`)
+- Use liveness for apps that might hang (e.g., due to memory leaks, infinite loops)
+- Combine both for production-level stability
+### YAML Snippet (Both Probes Together)
+- Pod Spec of Containers with `ReadinessProbe` and `LivenessProbe`:
+  ```yaml
+  containers:
+  - name: my-app
+    image: my-image
+    readinessProbe:
+      httpGet:
+        path: /ready
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 10
+    livenessProbe:
+      httpGet:
+        path: /live
+        port: 8080
+      initialDelaySeconds: 15
+      periodSeconds: 20
+  ```
+
