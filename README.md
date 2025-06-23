@@ -1191,6 +1191,7 @@
 
 ## Resource Requests and Limits
 - [Refer Here](https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/) for the Official docs.
+- Kubernetes **scheduler** places pods on nodes based on **available CPU & memory**.
 - Kubernetes lets you define **how much CPU and memory** (RAM) a container **requests** and the **maximum it can use**.
   - **Request:** Minimum resources the container is guaranteed to get
   - **Limit:** Maximum resources the container is allowed to use
@@ -1199,49 +1200,67 @@
     - `CPU = 0.5`
     - `Memory = 256Mi`
   - Pod might go into **Pending** state if no node has enough resources.
-### Pod with Resource Request
-- Based on `Pod Workloads APIs`, Write the Pod YAML file with `resources` field.
-- In `spec`, we have field `resources`.
-  ```yaml
-  apiVersion: v1
-  kind: Pod
-  metadata:
-    name: simple-webapp
-  spec:
-    containers:
-    - name: app
-      image: simple-webapp
-      resources:
-        requests:
-          memory: "1Gi"
-          cpu: "1"
-  ```
-- This pod **requires 1 CPU and 1Gi memory** to be scheduled.
+### Resource Request
+- Minimum resources **guaranteed** to a container.
+- Used **by the scheduler** to find a suitable node.
+- **Pod with Resource Request:**
+  - Based on `Pod Workloads APIs`, Write the Pod YAML file with `resources` field.
+  - In `spec`, we have field `resources`.
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: simple-webapp
+    spec:
+      containers:
+      - name: app
+        image: simple-webapp
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+    ```
+  - This pod **requires 1 CPU and 1Gi memory** to be scheduled.
 ### Pod with Resource Limits
-- Based on `Pod Workloads APIs`, Write the Pod YAML file with `resources` field.
-- In `spec`, we have field `resources`.
-  ```yaml
-  apiVersion: v1
-  kind: Pod
-  metadata:
-    name: simple-webapp
-  spec:
-    containers:
-    - name: app
-      image: simple-webapp
-      resources:
-        requests:
-          memory: "1Gi"
-          cpu: "1"
-        limits:
-          memory: "2Gi"
-          cpu: "2"
-  ```
-- This pod **won’t be allowed to use more than 2 CPU or 2Gi memory**.
+- Maximum resources a container is allowed to use.
+- Helps prevent a container from **hogging all resources**.
+- **Pod with Resource Limits:**
+  - Based on `Pod Workloads APIs`, Write the Pod YAML file with `resources` field.
+  - In `spec`, we have field `resources`.
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: simple-webapp
+    spec:
+      containers:
+      - name: app
+        image: simple-webapp
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "2"
+    ```
+  - This pod **won’t be allowed to use more than 2 CPU or 2Gi memory**.
+### CPU and Memory Units
+- CPU Units:
+  - `1 CPU` = `1 vCPU` = `1 core`.
+  - Can use **fractions**:
+    - `0.1` CPU = `100m` (m = milliCPU)
+    - Smallest: `1m` (0.001 CPU)
+- Memory Units:
+  - `Mi` = Mebibyte (1024 KiB)
+  - `Gi` = Gibibyte (1024 MiB)
+  - `M` = Megabyte (1000 KB)
+  - `G` = Gigabyte (1000 MB)
+  > Always prefer `Mi`, `Gi` in Kubernetes for precision.
 ### Exceeding Limits
 - If the container tries to use **more than its limits**:
-  - **CPU**: throttled (slowed down)
-  - **Memory**: container is **killed and restarted** (OOM error = Out Of Memory)
+  - **CPU**: Container is `throttled` (slowed down). No crash.
+  - **Memory**: Container is `killed and restarted` (OOMKilled). Memory is not throttle-able. (OOM error = Out Of Memory)
 ### Scenarios
 - **No requests, no limits:** Pod can consume everything, bad for others
 - **No requests, but limits set:** Request = limit by default
@@ -1251,6 +1270,33 @@
 - Requests and limits are defined **per container**, not per pod.
 - Use them to **protect nodes** from being overloaded.
 - Helps Kubernetes **schedule pods more efficiently**.
+### Default Requests & Limits
+- By **default**, Kubernetes sets **no requests or limits**.
+- This means pods may consume **unbounded** resources.
+- To enforce defaults: use **LimitRange**.
+  - Sets default **request and limit** for all containers in the namespace.
+  - Applies only when containers **don’t explicitly specify** values.
+#### LimitRange YAML Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `LimitRange`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.33/#limitrange-v1-core) for the **LimitRange Metadata APIs**.
+  - Based on `LimitRange Metadata APIs`, Write the LimitRange YAML file:
+    ```yaml
+    apiVersion: v1
+    kind: LimitRange
+    metadata:
+      name: cpu-memory-defaults
+      namespace: default
+    spec:
+      limits:
+      - default:
+          cpu: 500m
+          memory: 512Mi
+        defaultRequest:
+          cpu: 500m
+          memory: 256Mi
+        type: Container
+    ```
 
 ## Editing Pods & Deployments
 ### Editing Pods (Manually Created Pods)
@@ -1704,7 +1750,7 @@
 ### Enabling / Disabling Admission Controllers
 - View current enabled plugins:
   ```bash
-  kube-apiserver -h | grep enable-admission-plugins
+  kubectl exec -it kube-apiserver-controlplane -n kube-system -- kube-apiserver -h | grep enable-admission-plugins
   ```
 - **In kubeadm-based setups**, the API server runs as a static pod:
   - Modify:
@@ -1945,7 +1991,26 @@
   ```bash
   kubectl rollout history deployment <name>
   ```
+- **View specific revision rollout history:**
+  ```bash
+  kubectl rollout history deployment <name> --revision=1
+  ```
   ![preview](./Images/Kubernetes_CKA18.png)
+- **Recording Change Cause:**
+  - By default, `CHANGE-CAUSE` is `<none>`. Use `--record` to save the change cause:
+    ```bash
+    kubectl set image deployment nginx nginx=nginx:1.17 --record
+    ```
+  - Then check rollout history:
+    ```bash
+    kubectl rollout history deployment nginx
+    ```
+  - Output:
+    ```arduino
+    REVISION  CHANGE-CAUSE
+    1         <none>
+    2         kubectl set image deployment nginx nginx=nginx:1.17 --record=true
+    ```
 ### Deployment Strategies
 - There are **2 types** of deployment strategies:
   1. **Recreate Strategy:**
@@ -1997,6 +2062,10 @@
   - After rollback:
     - Old RS = Active pods
     - Faulty RS = 0 pods
+- Rollback to Specific Revision:
+  ```bash
+  kubectl rollout undo deployment <name> --to-revision=1
+  ```
 
 ## Commands & Arguments
 - [Refer Here](https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/) for the Official docs.
@@ -3470,6 +3539,7 @@
      openssl genrsa -out jane.key 2048
      openssl req -new -key jane.key -subj "/CN=jane" -out jane.csr
      ```
+     > `CN` = username
    - Encodes the CSR in **Base64**
      ```bash
      cat jane.csr | base64 -w 0
@@ -3557,8 +3627,8 @@
   users:
     - name: my-user
       user:
-        client-certificate: /path/to/cert.crt
-        client-key: /path/to/key.key
+        client-certificate: /path/to/jane.crt
+        client-key: /path/to/jane.key
   contexts:
     - name: my-context
       context:
@@ -3567,6 +3637,19 @@
         namespace: dev
   current-context: my-context
   ```
+  > **`ca.crt`** — The **cluster CA certificate** (used by clients to trust the API server). Usually located at `/etc/kubernetes/pki/ca.crt` on the control plane node.
+  > **`jane.key`** — The **user's private key** (created using OpenSSL)
+  > **`jane.crt`** — The **signed certificate** for user `jane` (received from Kubernetes after CSR approval)
+
+  > **`current-context`** — specifies the default context for the `kubeconfig` file.
+- **Optional: Use Embedded Certificates (No File Paths)**
+  - Instead of referencing files, you can **embed cert data directly** in base64:
+    ```yaml
+    certificate-authority-data: <base64-encoded-ca>
+    client-certificate-data: <base64-encoded-client-cert>
+    client-key-data: <base64-encoded-private-key>
+    ```
+  - Useful when sharing kubeconfig files.
 - **Understanding Contexts:**
   - A **context = user + cluster (+ namespace)**.
   - Example:
@@ -3588,6 +3671,23 @@
   kubectl --kubeconfig=/custom/path/config get pods
   # Test different kubeconfig file
   ```
+### Kubeconfig File Creation for Users
+#### Where to Create Kubeconfig
+- Kubeconfig is a **client-side file**.
+- It is typically created on the **user’s workstation**, **not inside the cluster**.
+- It allows the user to authenticate and interact with the cluster.
+- The user only needs:
+  - Their **private key** (`jane.key`)
+  - Their **signed certificate** (`jane.crt`)
+  - The **cluster CA certificate** (`ca.crt`) to trust the API server
+#### CA Certificate Requirement
+- To trust the Kubernetes API server, the user must have the **cluster's CA certificate**.
+- This file is **not automatically available** to users.
+- It must be **copied from the control plane node**:
+  ```bash
+  scp <control-plane-user>@<control-plane-ip>:/etc/kubernetes/pki/ca.crt /home/<user>/.kube/
+  ```
+  > The CA certificate (`ca.crt`) is **not secret** — it’s safe to distribute for authentication purposes.
 ### Setting a Custom Kubeconfig as Default (Persistent Setup)
 - Use your custom kubeconfig file (`/root/my-kube-config`) **by default** in all sessions without:
   - Needing to use `--kubeconfig` in every command
@@ -3745,6 +3845,7 @@
         resources: ["configmaps"]
         verbs: ["create"]
       ```
+      > **apiGroup:** For the `core` group, use an empty string (`""`). For other groups, specify their respective group names.
     - You can define **multiple rules** in one Role.
   - **Create Role with `kubectl`**:
     ```bash
@@ -3996,10 +4097,20 @@
     ```bash
     kubectl create token <service-account-name>
     ```
-  - The output token has an **expiry** (default: 1 hour).
-  - You can specify custom expiry using flags.
-  - If you still want a secret like old behavior:
+    - The output token has an **expiry** (default: 1 hour).
+    - You can specify custom expiry using flags.
+  - If you still want a secret like old behavior (Non-expiring):
     - You have to **manually create a secret** and bind it.
+      ```yaml
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: legacy-token
+        annotations:
+          kubernetes.io/service-account.name: <sa-name>
+      type: kubernetes.io/service-account-token
+      ```
+    - Not recommended due to **security risks** (non-expiring, static token).
 
 ## Securing Images in Kubernetes
 - **Image Naming Basics:**
@@ -4179,6 +4290,25 @@
           add: ["NET_ADMIN"]    # Adds extra Linux capability
           drop: ["ALL"]         # Drops all others
   ```
+### Commands
+- Exec into the Pod and Check the Running User
+  ```bash
+  kubectl exec -it <pod-name> -n <namespace> -- whoami
+                        (or)
+  kubectl exec -it <pod-name> -n <namespace> -- id
+  ```
+- Adding Capabilities in a Pod
+  ```yaml
+  securityContext:
+    capabilities:
+      add: ["NET_ADMIN", "SYS_TIME"]
+  ```
+- Remove Capabilities
+  ```yaml
+  securityContext:
+    capabilities:
+      drop: ["NET_ADMIN", "SYS_TIME"]
+  ```
 
 ## Kubernetes Network Policies
 - [Refer Here](https://kubernetes.io/docs/concepts/services-networking/network-policies/) for the Official docs.
@@ -4286,6 +4416,26 @@
           - protocol: TCP
             port: 80
     ```
+### NetworkPolicy and DNS (Port 53)
+- **Need of `port-53` in `NetworkPolicy`:**
+  - **DNS resolution** in Kubernetes is handled by **CoreDNS**, which listens on **port 53**.
+  - **Both UDP and TCP protocols** must be allowed to ensure reliable DNS access.
+- **Protocol details:**
+  1. **UDP 53** Primary protocol for DNS queries (fast, stateless)
+  2. **TCP 53** Fallback when UDP fails or response is too large (e.g., large lookups, zone transfers)
+- **Important for Pod Networking:**
+  - If **egress traffic is restricted**, DNS may **fail silently** without these rules.
+  - Without `port 53` access, pods cannot resolve service names like `mysql.default.svc.cluster.local`.
+- **Example egress rule to allow DNS:**
+  ```yaml
+  egress:
+  - ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP
+  ```
+  > This rule allows DNS queries to any pod on port 53 (used by CoreDNS).
 ### NetworkPolicy - Ingress Behavior Comparison
 1. **With `ingress: [{}]`**
     ```yaml
@@ -8488,6 +8638,7 @@ project/
 
 
 # <p align="center">Mock Exams</p>
+
 ## Lightning Lab-1
 ##### 1. Upgrade the current version of kubernetes from `1.31.0` to `1.32.0` exactly using the `kubeadm` utility. Make sure that the upgrade is carried out one node at a time starting with the controlplane node. To minimize downtime, the deployment `gold-nginx` should be rescheduled on an alternate node before upgrading each node. (Upgrade `controlplane` node first and drain node `node01` before upgrading it. Pods for `gold-nginx` should run on the `controlplane` node subsequently.)
 - [Refer Here](https://kubernetes.io/docs/home/) for the Official docs and search for `Upgrading Kubernetes Cluster using Kubeadm`.
@@ -8728,8 +8879,8 @@ DEPLOYMENT          CONTAINER_IMAGE          READY_REPLICAS          NAMESPACE
   - `Ready`: Pod is ready to serve traffic.
 ### Readiness Probes
 - **Used to decide if pod is ready to receive traffic.**
-- Without it: Kubernetes assumes container is ready **immediately** after starting → might forward traffic too early.
-- Fix: Add `readinessProbe` so Kubernetes only routes traffic when **app is truly ready**.
+- **Without it:** Kubernetes assumes container is ready **immediately** after starting → might forward traffic too early.
+- **Fix:** Add `readinessProbe` so Kubernetes only routes traffic when **app is truly ready**.
 - **Common Readiness Probe Configs:**
   ```yaml
   readinessProbe:
@@ -8746,8 +8897,8 @@ DEPLOYMENT          CONTAINER_IMAGE          READY_REPLICAS          NAMESPACE
   - `exec` – Run a custom command inside the container
 #### Example Use Case
 - A slow-starting app (e.g., Jenkins) takes time to be ready.
-- Without readiness probe: traffic is sent too soon.
-- With readiness probe: traffic waits until app is fully ready.
+- **Without readiness probe:** traffic is sent too soon.
+- **With readiness probe:** traffic waits until app is fully ready.
 - **Best Practice:** Use readiness probes in Deployments/ReplicaSets to **avoid serving traffic** to unready pods during scaling or rollouts.
 ### Liveness Probes
 - **Used to check if the app is still alive and responsive**.
@@ -8780,22 +8931,796 @@ DEPLOYMENT          CONTAINER_IMAGE          READY_REPLICAS          NAMESPACE
 - Use liveness for apps that might hang (e.g., due to memory leaks, infinite loops)
 - Combine both for production-level stability
 ### YAML Snippet (Both Probes Together)
-- Pod Spec of Containers with `ReadinessProbe` and `LivenessProbe`:
+- In the Pod YAML, under `spec→containers`, we have Fields `readinessProbe` and `livenessProbe`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#pod-v1-core) for the **Pod Workloads APIs**.
+  - Based on `Pod Workloads APIs`, write the YAML File.
+  - Pod Spec of Containers with `ReadinessProbe` and `LivenessProbe`:
+    ```yaml
+    containers:
+    - name: my-app
+      image: my-image
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+        initialDelaySeconds: 5
+        periodSeconds: 10
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 8080
+        initialDelaySeconds: 15
+        periodSeconds: 20
+    ```
+
+
+# <p align="center">POD Design</p>
+
+## Additional Deployment Strategies in Kubernetes
+- Kubernetes supports more than just `Recreate` and `RollingUpdate` strategies. You can also implement **Blue-Green** and **Canary** deployments manually using **Deployments + Services**.
+### Recreate Strategy (Basic)
+- All old Pods are terminated.
+- Then new Pods are created.
+- Application downtime during the update.
+### Rolling Update Strategy (`Default`)
+- Old Pods are gradually replaced by new Pods.
+- No downtime.
+- Seamless upgrade.
+### Blue-Green Deployment (`Manual`)
+- Run **two deployments**: one for old version (**Blue**) and one for new version (**Green**).
+- Only **one gets traffic** at a time via the Service.
+- Once the Green version is verified → **switch traffic** from Blue to Green by changing Service selector.
+#### Steps
+1. **Deploy Blue** version (v1).
+   - Label: `version: v1`
+   - Service selector: `version: v1`
+2. **Deploy Green** version (v2) alongside.
+   - Label: `version: v2`
+   - Service still points to Blue.
+3. Run tests on Green deployment.
+4. Update Service selector to `version: v2` to switch traffic.
+5. Optional: delete Blue deployment.
+#### Summary
+- Test new version before switching.
+- Easy rollback (just switch selector back).
+- Needs manual Service update.
+- Can be automated with tools or service mesh (e.g., Istio).
+### Canary Deployment (`Manual`)
+- Deploy a **small portion of the new version** alongside the old version.
+- Route **a small % of traffic** to it.
+- If all is good → update main deployment to new version and remove canary.
+#### Steps
+1. **Primary deployment** (v1) with 5 pods.
+   - Label: `app: frontend`
+   - Service selector: `app: frontend`
+2. **Canary deployment** (v2) with only 1 pod.
+   - Same label: `app: frontend`
+3. Service now routes to both (6 pods total).
+   - ~83% to v1 (5 pods), ~17% to v2 (1 pod).
+4. Monitor canary performance.
+5. If successful:
+   - Update primary deployment with v2 image.
+   - Delete canary deployment.
+#### Notes
+- Safer than full rollout.
+- Split is based on **number of pods**, not exact %
+- For **precise traffic control** (e.g., 1%), use **Istio** or another **Service Mesh**.
+
+## Kubernetes Jobs
+- **Jobs** are used to run **short-lived** tasks that:
+  - Do **one-time** work (e.g., image processing, sending emails).
+  - Run to **completion**, not continuously like web apps or DBs.
+- Examples:
+  - Math calculation
+  - Image processing
+  - Data analytics
+  - Report generation
+### Docker Analogy
+- Run a container that does a task and exits.
+- Docker shows it in `Exited` state with a return code (0 = success).
+### Pod Behavior in Kubernetes
+- If you run such tasks in a **Pod**, Kubernetes **restarts** it after completion (default).
+- Why? Because:
+  - **Restart policy** is `Always` by default.
+- To stop restarts:
+  - Set `restartPolicy: Never` or `OnFailure`.
+### Use Jobs Instead of Pods
+- For **batch processing**, we may need **multiple pods**:
+  - All should do the task once.
+  - Exit when completed.
+- **ReplicaSet** ensures a fixed number of pods *keep running*.
+- **Job** ensures a fixed number of pods *complete successfully*.
+### Job YAML Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `Job`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#job-v1-batch) for the **Job Workloads APIs**.
+  - Based on `Job Workloads APIs`, Write the Job YAML file:
+    ```yaml
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: math-add-job
+    spec:
+      template:
+        spec:
+          containers:
+          - name: add
+            image: busybox
+            command: ["expr", "3", "+", "2"]
+          restartPolicy: Never
+    ```
+    > Template is like Pod spec inside `spec.template`
+    > Must set `restartPolicy: Never`
+- **Commands:**
+  ```bash
+  kubectl create -f job.yaml
+  # Create a job using yaml
+  kubectl get jobs
+  # List all jobs
+  kubectl get pods
+  # List all pods
+  kubectl logs <pod-name>
+  # Get the output of job via container logs
+  kubectl delete job <job-name>
+  # Delete the job (Deleting a job also deletes the pods it created)
+  ```
+- **Note:**
+  - **Completed** status: Job finished successfully.
+  - **Logs**: Get output from container via `kubectl logs`.
+#### Run Multiple Pods with a Job
+- Add `completions: N` (e.g., `3`) to run 3 pods sequentially.
   ```yaml
-  containers:
-  - name: my-app
-    image: my-image
-    readinessProbe:
-      httpGet:
-        path: /ready
-        port: 8080
-      initialDelaySeconds: 5
-      periodSeconds: 10
-    livenessProbe:
-      httpGet:
-        path: /live
-        port: 8080
-      initialDelaySeconds: 15
-      periodSeconds: 20
+  spec:
+    completions: 3
+  ```
+- Kubernetes will:
+  - Run pods one-by-one.
+  - Keep retrying failed pods until all succeed.
+#### Retry on Failure
+- If a pod fails randomly, Job retries until the number of `completions` is achieved.
+- **Example:** 3 completions → may need 5 pods if 2 fail.
+#### backoffLimit
+- `backoffLimit` defines **how many times** Kubernetes should **retry a failed Job (or Pod)** before **giving up** and marking it as **failed**.
+- You set it **inside the `spec`**:
+  ```yaml
+  spec:
+    backoffLimit: 4     # Retry failed pod up to 4 times
+  ```
+- If the **Pod inside the Job fails**, Kubernetes will **retry it up to `backoffLimit` times**.
+- If it still fails after that, the **Job fails**.
+- **Default Value:** If you don’t set it, the default `backoffLimit` is **6**.
+#### Run Jobs in Parallel
+- Add `parallelism: N` to run N pods at once.
+  ```yaml
+  spec:
+    completions: 3
+    parallelism: 3
+  ```
+- Kubernetes creates multiple pods in parallel.
+- Continues launching only failed ones until `completions` met.
+#### activeDeadlineSeconds
+- `activeDeadlineSeconds` sets a **time limit** (in seconds) for how long a Job is allowed to run.
+- If the Job runs **longer than the specified time**, Kubernetes will **terminate the Job** (mark it as **failed**).
+  ```yaml
+  spec:
+    activeDeadlineSeconds: 60
+  ```
+  - The Job will be killed after `60` seconds.
+
+## Kubernetes CronJobs
+- A **CronJob** is a **scheduled Job** in Kubernetes.
+- Similar to **Linux Crontab**.
+- Useful for **recurring tasks** like:
+  - Sending emails
+  - Backups
+  - Generating reports
+  - Cleaning temp files
+### Job vs CronJob
+- **Job:**
+  - Runs **once immediately**
+  - Manual or one-time task
+- **CronJob:**
+  - Runs **on a schedule**
+  - Periodic/automated task
+### CronJob YAML Configuration
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `CronJob`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#job-v1-batch) for the **CronJob Workloads APIs**.
+  - Based on `CronJob Workloads APIs`, Write the CronJob YAML file:
+    ```yaml
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: reporting-cronjob
+    spec:
+      schedule: "*/5 * * * *"        # Run every 5 minutes
+      jobTemplate:
+        spec:
+          template:
+            spec:
+              containers:
+              - name: report
+                image: busybox
+                args:
+                - /bin/sh
+                - -c
+                - date; echo "Report generated"
+              restartPolicy: OnFailure
+    ```
+    > `schedule`: Uses **Cron format**
+    > `jobTemplate`: Same as a regular Job
+    > Must specify `restartPolicy` (`OnFailure` or `Never`)
+- **Structure Note:**
+  - There are **3 nested `spec` sections**:
+    1. `spec:` – for **CronJob**
+    2. `jobTemplate.spec:` – for **Job**
+    3. `template.spec:` – for **Pod**
+  > Be **careful with indentation** and nesting.
+- **Commands:**
+  ```bash
+  kubectl create -f cronjob.yaml
+  # Create CronJob
+  kubectl get cronjob
+  # List CronJobs
+  kubectl get jobs
+  # List Jobs created by CronJob
+  kubectl get pods
+  # List Pods created by those Jobs
+  kubectl logs <pod-name>
+  # Check logs of a pod
+  kubectl delete cronjob <cronjob-name>
+  # Delete CronJob
+  ```
+### Cron Schedule Format
+- **Format:** `* * * * *` (**`Minutes` `Hours` `Day of the Month` `Month` `Day of the week`**)
+  - **Minute** → `0–59`
+  - **Hour** → `0–23`
+  - **Day of Month** → `1–31`
+  - **Month** → `1–12` or `Jan–Dec`
+  - **Day of Week** → `0–6` (Sun–Sat)
+- **Examples:**
+  - `"0 * * * *"` → every hour
+  - `"30 2 * * *"` → at 2:30 AM daily
+  - `"*/5 * * * *"` → every 5 minutes
+### Cleanup
+- By default, **old jobs and pods** created by CronJob are kept.
+- You can limit them with `successfulJobsHistoryLimit` and `failedJobsHistoryLimit` inside the top-level `spec:` of the **CronJob**
+  ```yaml
+  spec:
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 1
   ```
 
+
+# <p align="center">State Persistence</p>
+
+## StatefulSets in Kubernetes
+### StatefulSets `vs` Deployments
+- **Deployments** are good for **stateless** applications (e.g., web servers).
+- But **databases** like MySQL require:
+  - **Ordered startup** (e.g., master before slaves)
+  - **Stable network identity (hostname)** for replication setup
+  - **Persistent data** (e.g., using PVCs)
+- **Deployments** do **not** guarantee:
+  - Startup **order**
+  - **Stable pod names** (they change after restart)
+  - Pods have **random names** and **dynamic IPs**
+### Real-World Example: `MySQL Replication`
+- To understand StatefulSets, consider a **MySQL master-slave setup**:
+  1. **Master** starts first and is available at a **fixed hostname** (e.g., `mysql-0`)
+  2. **Slave 1** clones data from master, then starts replication
+  3. **Slave 2** clones data from Slave 1, then connects to master
+- **Requires:**
+  - Ordered pod startup
+  - Fixed hostnames (e.g., `mysql-0`, `mysql-1`, etc.)
+  - Each slave must **know the master’s hostname**
+- Deployments can't support this structure — enter **StatefulSets**!
+### Key Features of StatefulSets
+- **Ordered Deployment:** Pods are created one-by-one (`mysql-0`, then `mysql-1`, etc.)
+- **Stable Network Identity:** Each pod has a **predictable name** like `<name>-0`, `<name>-1`, etc.
+- **Sticky Identity:** Even after restart, pod keeps its original name (e.g., `mysql-0`)
+- **Ordered Termination:** Pods are **deleted in reverse order** (`mysql-2` deleted first)
+- **Persistent Storage:** Each pod gets its own **PersistentVolumeClaim (PVC)**
+### StatefulSet YAML Configuration
+- It’s similar to a `Deployment` with a few changes.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/) for `One-page API Reference for Kubernetes` and choose required Version.
+  - Select required API, in this case `StatefulSet`.
+- [Refer Here](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.32/#statefulset-v1-apps) for the **StatefulSet Workloads APIs**.
+  - Based on `StatefulSet Workloads APIs`, Write the StatefulSet YAML file:
+    ```yaml
+    apiVersion: apps/v1
+    kind: StatefulSet         # Not Deployment
+    metadata:
+      name: mysql
+    spec:
+      serviceName: "mysql"    # Must specify a service (usually headless)
+      replicas: 3
+      selector:
+        matchLabels:
+          app: mysql
+      template:
+        metadata:
+          labels:
+            app: mysql
+        spec:
+          containers:
+          - name: mysql
+            image: mysql:8
+            ports:
+            - containerPort: 3306
+    ```
+    > **Important:** You must specify a **headless service** (`ClusterIP: None`) for stable DNS.
+### Hostname Format
+- Pods in a StatefulSet are accessible via:
+  ```
+  <pod-name>.<service-name>.<namespace>.svc.cluster.local
+  e.g., mysql-0.mysql.default.svc.cluster.local
+  ```
+- This helps in identifying **master/slaves** reliably.
+### podManagementPolicy
+- **Default:** `OrderedReady`
+  - Pods are created one-by-one **in order** (and wait for each to become ready)
+- **Optional:** `Parallel`
+  - All pods created **at once** (but names are still stable)
+    ```yaml
+    spec:
+      podManagementPolicy: Parallel
+    ```
+  - Use `Parallel` if **startup order doesn't matter**.
+### Use Cases for StatefulSets
+- Databases (MySQL, PostgreSQL)
+- Queues (Kafka, RabbitMQ)
+- Storage systems (Cassandra, etcd)
+- Any system that needs:
+  - **Ordered boot**
+  - **Stable network identity**
+  - **Persistent storage per pod**
+
+## Kubernetes Headless Services
+### Use of Headless Services
+- In **StatefulSets**, each pod gets a **unique name** (e.g., `mysql-0`, `mysql-1`, etc.).
+- For applications like **MySQL master-slave**, we need:
+  - **Reads** from any pod.
+  - **Writes** only to the **master pod** (e.g., `mysql-0`).
+### The Problem
+- A **normal service** (e.g., `mysql`) does **load balancing** to all pods.
+- So, **writes might go to slaves**, which is wrong in master-slave setups.
+- You can’t use pod IPs (they are dynamic).
+- You can’t use pod DNS (based on IPs, changes when pod restarts).
+### Headless Service = Solution
+- A **headless service**:
+  - Has **no ClusterIP** (`clusterIP: None`).
+  - Doesn’t do **load balancing**.
+  - Creates **DNS records** for **individual pods**.
+### DNS Format Created by Headless Service
+- Each pod gets a DNS like:
+  ```
+  <pod-name>.<headless-service-name>.<namespace>.svc.cluster.local
+  ```
+- Example for master pod:
+  ```
+  mysql-0.mysql-h.default.svc.cluster.local
+  ```
+### YAML Configuration for Headless Service
+- The YAML configuration for a Headless Service is similar to that of a regular Service, with the key difference being the use of `None` for `ClusterIP`:
+  ```yaml
+  apiVersion: v1
+  kind: Service
+  metadata:
+    name: mysql-h
+  spec:
+    clusterIP: None       # This makes it headless
+    selector:
+      app: mysql
+    ports:
+      - port: 3306
+  ```
+### How DNS Records Are Created for Pods
+- To generate pod-level DNS records, pods must have:
+  1. `subdomain`: same as the **headless service name**.
+  2. `hostname`: unique per pod.
+- **Example Pod Spec (for DNS to work):**
+  ```yaml
+  spec:
+    hostname: mysql-0
+    subdomain: mysql-h
+  ```
+### StatefulSet + Headless Service
+- In StatefulSet YAML, specify the headless service:
+  ```yaml
+  spec:
+    serviceName: mysql-h
+  ```
+- Kubernetes will:
+  - Assign `subdomain` = `mysql-h`
+  - Set `hostname` = pod name (e.g., `mysql-0`)
+  - Auto-create DNS entries
+
+## Storage in StatefulSets
+### Kubernetes Storage Basics
+- **PersistentVolume (PV):** A storage resource in the cluster.
+- **PersistentVolumeClaim (PVC):** A request for storage (binds to a PV).
+- **Pod → PVC → PV** (Mount PVC to pod to use PV).
+### Dynamic Provisioning (StorageClass)
+- Avoid manual PV creation by using a `StorageClass` with a **provisioner**.
+- Kubernetes creates PV **dynamically** when PVC is created.
+### How StatefulSets Use Storage
+#### Issue:
+- If you use **same PVC** for all pods in a StatefulSet → all pods share **one volume**.
+- Useful **if sharing storage is intended**, but...
+  - Not all storage types allow **concurrent Read/Write** access from multiple pods.
+### Real-world Example: `MySQL Replication`
+- Each MySQL pod needs **its own volume** (each has its own DB).
+- No sharing – replication is done at DB level (not Kubernetes).
+#### Solution: `VolumeClaimTemplates`
+- Use **`volumeClaimTemplates`** in StatefulSet.
+- It's a **PVC template** inside StatefulSet YAML.
+- **Benefits:**
+  - Automatically creates **one PVC per pod**.
+  - Each PVC binds to its **own PV** (via `StorageClass`).
+  - Supports **dynamic provisioning** for each pod.
+- **YAML Summary:**
+  ```yaml
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: standard
+        resources:
+          requests:
+            storage: 1Gi
+  ```
+  > This creates PVCs like:
+  > * `data-mysql-0`
+  > * `data-mysql-1`
+  > * `data-mysql-2`
+- **What Happens During Pod Creation?**
+  1. Pod created by StatefulSet.
+  2. PVC auto-created from template.
+  3. StorageClass provisions a volume.
+  4. Volume becomes PV.
+  5. PV binds to PVC and mounts to pod.
+- **If pod crashes or moves to another node:**
+  - PVC and PV **are not deleted**.
+  - Pod is **reattached to the same volume**.
+  - Ensures **stable and persistent storage** for each pod.
+
+
+# <p align="center">Security</p>
+
+## Kubernetes API Versions
+- In Kubernetes, each **API group** (like `apps`, `batch`, `networking.k8s.io`) has **versions**:
+  - These versions indicate the **maturity** and **stability** of the API.
+### Types of API Versions
+- **Alpha:**
+  - Early-stage feature, just added to K8s
+  - May change or be removed
+  - Disabled by default and Unstable
+  - **Use Case:**
+    - For testing by expert users
+  - **Example:**
+    - `v1alpha1`: Alpha
+- **Beta:**
+  - More stable than Alpha, Enabled by default
+  - Has end-to-end tests, May still change slightly
+  - **Use Case:**
+    - For users to try and give feedback
+  - **Example:**
+    - `v1beta1`: Beta
+- **GA (Stable):**
+  - Generally Available (e.g. `v1`), Fully stable & reliable
+  - Enabled by default
+  - Backward compatible and Passes conformance tests
+  - **Use Case:**
+    - Production use
+  - **Example:**
+    - `v1`: Stable (GA)
+### Multiple Versions at the Same Time?
+- Yes! An API group can support multiple versions **at once**.
+- For example:
+  ```yaml
+  apiVersion: autoscaling/v1
+  apiVersion: autoscaling/v2beta1
+  ```
+- Both can be used in YAML, but only **one** is:
+  - **Preferred Version**: Returned when you run `kubectl get`, `kubectl explain`, etc.
+  - **Storage Version**: The version used to **store objects in etcd**, no matter which version was used in YAML.
+### Preferred vs Storage Version
+- **Preferred Version:** Used by default in API queries like `kubectl get`, `kubectl explain`
+- **Storage Version:** Version in which object is saved in etcd, even if created via another version
+  > **Note**: These two can be **different**, but are often the same.
+#### How to View Preferred Version?
+- You can check it via API discovery:
+  ```bash
+  kubectl get --raw /apis/<group-name>/
+  ```
+- Example: `kubectl get --raw /apis/batch/`
+  - It will list all available versions and highlight the preferred one.
+#### How to Check Storage Version?
+- No direct command. You need to:
+  1. Access etcd
+  2. Inspect the stored object
+     ```bash
+     ETCDCTL_API=3 etcdctl get /registry/deployments/default/blue --prefix --keys-only
+     ```
+### How to Enable/Disable API Versions?
+- To enable an **Alpha** or optional version:
+  1. Edit the **kube-apiserver** config:
+     ```bash
+     --runtime-config=<group/version>
+     ```
+     - Example:
+       ```bash
+       --runtime-config=internal.apiserver.k8s.io/v1alpha1
+       ```
+  2. Restart `kube-apiserver` after the change.
+
+## API Deprecations in Kubernetes
+- Kubernetes APIs evolve over time. Some API versions get removed or deprecated.
+- **Deprecation** means the API still works but will be **removed in the future**.
+- There are **rules** defined under the **API Deprecation Policy**.
+### Why are there multiple API versions?
+- APIs are versioned (e.g., `v1alpha1`, `v1beta1`, `v1`).
+- This allows:
+  - Testing features in **Alpha**,
+  - Improving and stabilizing them in **Beta**,
+  - Finalizing in **GA (General Availability)** version (`v1`).
+### API Version Lifecycle (Example)
+1. Developer creates an API group (e.g., `codecloud.com`) with resources like `Course`, `Webinar`.
+2. Starts as `v1alpha1` (Alpha version).
+3. If a resource (like `Webinar`) is no longer needed:
+   - **Cannot remove** it from the same version.
+   - Must create a new version (`v1alpha2`) and remove it there.
+4. So older versions must still be **supported** while transitioning.
+### Key Rules of API Deprecation Policy
+#### Rule:1 `Version Bump Required to Remove Resources`
+- You **cannot remove** a field or resource from the same version.
+- Must **increment version** (e.g., from `v1alpha1` to `v1alpha2`) to remove items.
+#### Rule:2 `Round-trip Conversion Must Be Lossless`
+- Objects must be convertible **between versions without losing data**.
+- Exception: Fields that only exist in newer versions (like `duration` in `v1alpha2`) must be handled carefully.
+#### Rule:3 `Lower Stability Cannot Deprecate Higher Stability`
+- **Alpha/Beta CANNOT deprecate GA** (`v1`).
+- Only a **GA version can deprecate** another GA or lower version.
+#### Rule:4A `API Version Support Timeline`
+- After deprecation:
+  - **Alpha**: 0 releases (can be removed immediately).
+  - **Beta**: Minimum **3 releases or 9 months**.
+  - **GA**: Minimum **3 releases or 12 months**.
+#### Rule:4B `Preferred/Storage Version Change Delay`
+- New version becomes **preferred/storage** only in **the NEXT release** after it's introduced alongside the previous version.
+### Version Timeline Example
+
+| K8s Release | API Versions Available     | Notes                                 |
+| ----------- | -------------------------- | ------------------------------------- |
+| X           | `v1alpha1`                 | Initial version                       |
+| X+1         | `v1alpha2`                 | `v1alpha1` removed                    |
+| X+2         | `v1beta1`                  | `v1alpha2` removed                    |
+| X+3         | `v1beta1`, `v1beta2`       | `v1beta1` deprecated                  |
+| X+4         | `v1beta1`, `v1beta2`       | `v1beta2` becomes preferred           |
+| X+5         | `v1beta1`, `v1beta2`, `v1` | `v1` released (GA), others deprecated |
+| X+6         | `v1beta2`, `v1`            | `v1` becomes preferred                |
+| X+7         | `v1beta2`, `v1`            | Final support for `v1beta2`           |
+| X+8         | `v1`                       | Only GA version left                  |
+### `kubectl convert` – Update YAML Manifests
+- Used to **upgrade old manifests** to newer API versions.
+- Syntax:
+  ```bash
+  kubectl-convert -f <old-yaml-file> --output-version=<group/version>
+  ```
+- Example:
+  ```bash
+  kubectl-convert -f old-deployment.yaml --output-version=apps/v1
+  ```
+- Outputs the updated manifest using the new API version.
+- This is a **plugin** – install separately using:
+  - Official Kubernetes plugins documentation [Refer Here](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/#install-kubectl-convert-plugin)
+
+
+# <p align="center">Kubernetes Challenges</p>
+
+## Kubernetes Challenges
+##### 1. Deploy the given architecture diagram for implementing a `Jekyll SSG`.
+  ![preview](./Images/Kubernetes_CKA55.png)
+- **Create `Kubeconfig` for `martine`:**
+  - Build user information for `martin` in the default kubeconfig file: User = `martin`, client-key = `/root/martin.key` and client-certificate = `/root/martin.crt` (Ensure don't embed within the kubeconfig file)
+  - Create a new context called `developer` in the default kubeconfig file with `user = martin` and `cluster = kubernetes`
+- **Create Role for `developer-role`:**
+  - `developer-role`, should have all(`*`) permissions for `services` in `development` namespace
+  - `developer-role`, should have all permissions(`*`) for `persistentvolumeclaims` in `development` namespace
+  - `developer-role`, should have all(`*`) permissions for `pods` in `development` namespace
+- **Create RoleBinding for `developer-rolebinding`:**
+  - create rolebinding = `developer-rolebinding`, role= `developer-role`, namespace = `development`
+  - rolebinding = `developer-rolebinding` associated with user = `martin`
+- **Set `Kubeconfig`:**
+  - set context `developer` with user = `martin` and cluster = `kubernetes` as the current context.
+- **Inspect `PV`:**
+  - `jekyll-site pv` is already created. Inspect it before you create the `pvc`.
+- **Create `PVC`:**
+  - Storage Request: `1Gi`, Access modes: `ReadWriteMany`, pvc name = `jekyll-site` and namespace = `development`
+  - `jekyll-site` PVC should be bound to the PersistentVolume called `jekyll-site`.
+- **Create `Pod`:**
+  - pod: `jekyll` has an `initContainer`, name: `copy-jekyll-site`, image: `gcr.io/kodekloud/customimage/jekyll`, command: `[ "jekyll", "new", "/site" ]` (command to run: `jekyll new /site`), mountPath = `/site` and volume name = `site`
+  - pod: `jekyll`, container: `jekyll`, volume name = `site`, mountPath = `/site`, image = `gcr.io/kodekloud/customimage/jekyll-serve`, uses volume called `site` with pvc = `jekyll-site`
+  - pod: `jekyll` uses label `run=jekyll`
+- **Create `Service`:**
+  - Service `jekyll` uses targetPort: `4000`, Port: `8080`, NodePort: `30097` and namespace: `development`
+##### 2. This 2-Node Kubernetes cluster is broken! Troubleshoot, fix the cluster issues and then deploy the objects according to the given architecture diagram to unlock our `Image Gallery`!!
+  ![preview](./Images/Kubernetes_CKA56.png)
+- **Fix `Controlplane`:**
+  - Master Node: `coredns` deployment has image: `registry.k8s.io/coredns/coredns:v1.8.6`
+  - Fix `kube-apiserver`. Make sure its running and healthy.
+  - kubeconfig = `/root/.kube/config`, User = `kubernetes-admin` and Cluster Server Port = `6443`
+- **Fix `Node01`:**
+  - `node01` is ready and can schedule pods?
+- **Copy Images from `Controlplane` to `Node01`:**
+  - Copy all images from the directory `/media` on the `controlplane` node to `/web` directory on `node01`
+- **Create `PersistentVolume:`**
+  - Create new PersistentVolume = `data-pv`, accessModes = `ReadWriteMany`, hostPath = `/web` and storage = `1Gi`
+- **Create `PersistentVolumeClaim`:**
+  - Create new PersistentVolumeClaim = `data-pvc`, accessModes = `ReadWriteMany`, storage request = `1Gi` and volumeName = `data-pv`
+- **Create a `Pod`:**
+  - Create a pod for file server, name: `gop-file-server`, image: `kodekloud/fileserver`, mountPath: `/web`, volumeMount name: `data-store`, persistent volume name: `data-store` and persistent volume claim used: 'data-pvc'
+- **Create `Service`:**
+  - Create new Service, name: `gop-fs-service`, port: `8080`, targetPort: `8080` and NodePort: `31200`
+##### 3. Deploy the given architecture to `vote` namespace.
+  ![preview](./Images/Kubernetes_CKA57.png)
+- **Create `Namespace`:**
+  - Create a new namespace: name = `vote`
+- **Create `Worker Deployment`:**
+  - Create new deployment, name: `worker`, image: `dockersamples/examplevotingapp_worker` and status: `Running`
+- **Create `Redis Deployment`:**
+  - Create new deployment, name: `redis`, image: `redis:alpine`, Volume Type: `EmptyDir`, Volume Name: `redis-data`, mountPath: `/data` and status: `Running`
+- **Create `Redis Service`:**
+  - Create new Service, name = `redis`, port: `6379`, targetPort: `6379`, type: `ClusterIP` and service endpoint exposes deployment `redis`
+- **Create `Vote Deployment`:**
+  - Create a deployment: name = `vote`, image = `dockersamples/examplevotingapp_vote` and status: `Running`
+- **Create `Vote Service`:**
+  - Create a new service: name = `vote`, port = `8080`, targetPort = `80`, nodePort= `31000` and service endpoint exposes deployment `vote`
+- **Create `db Deployment`:**
+  - Create new deployment, name: `db`, image: `postgres:15-alpine`, add the env: `POSTGRES_HOST_AUTH_METHOD=trust`, Volume Type: `EmptyDir`, Volume Name: `db-data`, mountPath: `/var/lib/postgresql/data` and status: `Running`
+- **Create `db Service`:**
+  - Create new service: `db`, port: `5432`, targetPort: `5432`, type: `ClusterIP` and service endpoint exposes deployment `db`
+- **Create `Result Deployment`:**
+  - Create new deployment, name: `result`, image: `dockersamples/examplevotingapp_result` and status: `Running`
+- **Create `Result Service`:**
+  - Create a new service, name = `result`, port: `8081`, targetPort: `80`, NodePort: `31001` and service endpoint exposes deployment `result`
+##### 4. Build a highly available `Redis Cluster` based on the given architecture diagram.
+  ![preview](./Images/Kubernetes_CKA58.png)
+- **Create `PersistentVolumes`:**
+  - Create six PersistentVolumes, Names: `redis01`, `redis02`, .... `redis06`
+  - Access modes: `ReadWriteOnce` and Size: `1Gi`
+  - hostPaths: `/redis01`, `/redis02`, .... `/redis06` and directories should be created on `worker node`
+- **Inspect `ConfigMap`:**
+  - ConfigMap: `redis-cluster-configmap` is already created. Inspect it…
+- **Create `StatefulSet`:**
+  - Create StatefulSet, Name: `redis-cluster`, Replicas: `6`, Image: `redis:5.0.1-alpine`, Label = `app: redis-cluster`, container name: `redis`, command: `["/conf/update-node.sh", "redis-server", "/conf/redis.conf"]` and  Pods status: `Running` (All 6 replicas)
+  - Env:
+    - name: `POD_IP`, valueFrom: `fieldRef` and fieldPath: `status.podIP` (apiVersion: v1)
+  - Ports:
+    - name: `client`, containerPort: `6379`
+    - name: `gossip`, containerPort: `16379`
+  - Volume Mount:
+    - name: `conf`, mountPath: `/conf`, readOnly: `false` (ConfigMap Mount)
+    - name: `data`, mountPath: `/data`, readOnly: `false` (volumeClaim)
+  - Volumes:
+    - name: `conf`, Type: `ConfigMap`, ConfigMap Name: `redis-cluster-configmap`
+    - name: `conf`, ConfigMap Name: `redis-cluster-configmap`, defaultMode = `0755`
+  - volumeClaimTemplates, name: `data`, accessModes: `ReadWriteOnce`, Storage Request: `1Gi`
+- **Create `Service`:**
+  - Ports:
+    - service name: `redis-cluster-service`, port name: `client`, port: `6379`, targetPort: `6379`
+    - service name: `redis-cluster-service`, port name: `gossip`, port: `16379`, targetPort: `16379`
+- **Check `Redis Cluster Config`:**
+  - Command: `kubectl exec -it redis-cluster-0 -- redis-cli --cluster create --cluster-replicas 1 $(kubectl get pods -l app=redis-cluster -o jsonpath='{range.items[*]}{.status.podIP}:6379 {end}')`
+
+
+# <p align="center">Mock Exams</p>
+
+## Lightning Lab-1
+##### 1. Create a Persistent Volume called `log-volume`. It should make use of a storage class name `manual`. It should use `RWX` as the access mode and have a size of `1Gi`. The volume should use the hostPath `/opt/volume/nginx`. Next, create a PVC called `log-claim` requesting a minimum of `200Mi` of storage. This PVC should bind to `log-volume`. Mount this in a pod called `logger` at the location `/var/www/nginx`. This pod should use the image `nginx:alpine`.
+- Create a `Persistent Volume` manifest file using Official Kubernetes documentation with given specifications.
+- Create a `Persistent Volume Claim` manifest file using Official Kubernetes documentation with given specifications.
+- Create a `Pod` using imperative command with given specifications.
+##### 2. We have deployed a new pod called `secure-pod` and a service called `secure-service`. Incoming or Outgoing connections to this pod are not working. Troubleshoot why this is happening. Make sure that incoming connection from the pod `webapp-color` are successful. `Important:` Don't delete any current objects deployed.
+- Connect to `webapp-color` and test connectivity to `secure-service`:
+  ```bash
+  kubectl exec -it webapp-color -- sh -c "nc -v -z -w 2 secure-service 80"
+  ```
+- Create a `NetworkPolicy` manifest file using the Official Kubernetes documentation. Specify ingress rules to allow access from the `webapp-color` pod to the `secure-pod`.
+##### 3. Create a pod called `time-check` in the `dvl1987` namespace. This pod should run a container called `time-check` that uses the `busybox` image. Create a config map called `time-config` with the data `TIME_FREQ=10` in the same namespace. The `time-check` container should run the command: `while true; do date; sleep $TIME_FREQ;done` and write the result to the location `/opt/time/time-check.log`. The path `/opt/time` on the pod should mount a `volume` that lasts the lifetime of this pod.
+- Create a `Namespace` using an imperative command with the specified name.
+- Create a `ConfigMap` in the created namespace using an imperative command with the specified key-value pairs.
+- Create a `Pod` manifest file using the Official Kubernetes documentation, ensuring it meets the given specifications.
+##### 4. Create a new deployment called `nginx-deploy`, with one single container called `nginx`, image `nginx:1.16` and `4` replicas. The deployment should use `RollingUpdate` strategy with `maxSurge=1` and `maxUnavailable=2`. Next `upgrade` the deployment to version `1.17`. Finally, once all pods are updated, `undo` the `update` and go back to the previous version.
+- Create a `Deployment` manifest file using imperative command with the specified parameters.
+- `Update` the deployment to the `given version` using the imperative command. After the update is complete, `roll back` the deployment to the previous version using the `undo command`.
+##### 5. Create a `redis` deployment with the following parameters: Name of the deployment should be `redis` using the `redis:alpine` image. It should have exactly `1` replica. The container should request for `0.2` CPU. It should use the label `app=redis`. It should mount exactly `2` volumes. (a). An Empty directory volume called `data` at path `/redis-master-data`. (b). A configmap volume called `redis-config` at path `/redis-master`. (c). The container should expose the port `6379`. The configmap has already been created.
+- Create a `Deployment` manifest file using Official Kubernetes documentation with the specified parameters.
+
+## Lightning Lab-2
+##### 1. We have deployed a few pods in this cluster in various namespaces. Inspect them and identify the pod which is not in a `Ready` state. Troubleshoot and fix the issue. Next, add a check to restart the container on the same pod if the command `ls /var/www/html/file_check fails`. This check should start after a delay of `10 seconds` and run every `60 seconds`. You may delete and recreate the object. Ignore the warnings from the probe.
+- Inspect all Pods across namespaces and identify the Pod that is not in a `Ready` state.
+- Troubleshoot and resolve the issue.
+- Add a `livenessProbe` to the Pod with the provided specifications. Refer to the Official Kubernetes documentation for configuring the `livenessProbe`.
+- Delete and recreate the Pod if necessary.
+- Ignore any warnings related to the probe configuration.
+##### 2. Create a cronjob called `dice` that runs every `one minute`. Use the Pod template located at `/root/throw-a-dice`. The image `throw-dice` randomly returns a value between `1` and `6`. The result of `6` is considered `success` and all others are `failure`. The job should be `non-parallel` and complete the task `once`. Use a `backoffLimit` of `25`. If the task is not completed within `20 seconds` the job should fail and pods should be terminated. You don't have to wait for the job completion. As long as the cronjob has been created as per the requirements.
+- Create a `CronJob` using an imperative command and export it to a file using the `--dry-run=client` flag.
+- Edit the exported file to configure the `CronJob` with the specified requirements using the Official Kubernetes documentation.
+##### 3. Create a pod called `my-busybox` in the `dev2406` namespace using the `busybox` image. The container should be called `secret` and should sleep for `3600` seconds. The container should mount a `read-only` secret volume called `secret-volume` at the path `/etc/secret-volume`. The secret being mounted has already been created for you and is called `dotfile-secret`. Make sure that the pod is scheduled on `controlplane` and no other node in the cluster.
+- Create a `Pod` using an imperative command and export its configuration to a file using the `--dry-run=client` flag.
+- Modify the exported file to include the specified requirements using the Official Kubernetes documentation.
+- Add a `nodeSelector` to ensure the Pod is scheduled on the `controlplane` node.
+##### 4. Create a single ingress resource called `ingress-vh-routing`. The resource should route `HTTP` traffic to multiple hostnames as specified: (a). The service `video-service` should be accessible on `http://watch.ecom-store.com:30093/video` & (b). The service `apparels-service` should be accessible on `http://apparels.ecom-store.com:30093/wear`. To ensure that the path is correctly rewritten for the backend service, add the `annotation` to the resourc `nginx.ingress.kubernetes.io/rewrite-target: /`. Here `30093` is the port used by the Ingress Controller.
+- Create an `Ingress` resource using the Official Kubernetes documentation with the specified requirements.
+##### 5. A pod called `dev-pod-dind-878516` has been deployed in the default namespace. Inspect the logs for the container called `log-x` and redirect the warnings to `/opt/dind-878516_logs.txt` on the `controlplane` node.
+- Use logs command with `| grep` to get the `WARNINGS`. Use the following command: 
+  ```bash
+  kubectl logs pod/dev-pod-dind-878516 -c log-x | grep -i WARNING > /opt/dind-878516_logs.txt
+  ```
+
+## Mock Exam-1
+##### 1. Deploy a pod named `nginx-448839` using the `nginx:alpine` image.
+- Create a `Pod` using imperative commands with the given specifications.
+##### 2. Create a namespace named `apx-z993845`.
+- Create a `Namespace` using imperative commands with the given specifications.
+##### 3. Create a new Deployment named `httpd-frontend` with `3` replicas using image `httpd:2.4-alpine`.
+- Create a `Deployment` using imperative commands with the given specifications.
+##### 4. Deploy a `messaging` pod using the `redis:alpine` image with the labels set to `tier=msg`
+- Create a `Pod` using imperative commands with the given specifications.
+##### 5. A replicaset `rs-d33393` is created. However the pods are not coming up. Identify and fix the issue. Once fixed, ensure the ReplicaSet has `4 Ready` replicas.
+- Inspect the `ReplicaSet` configuration to identify the issue. Resolve the problem and delete any existing `Pods` if necessary. Ensure all `Pods` are in a running state with the desired number of replicas.
+##### 6. Create a service `messaging-service` to expose the `redis` deployment in the `marketing` namespace within the cluster on port `6379`. Use imperative commands.
+- Create a `Service` using imperative commands with the given specifications.
+##### 7. Update the environment variable on the pod `webapp-color` to use a `green` background.
+- Retrieve the YAML configuration of the `webapp-color` pod using the `kubectl get pod webapp-color -o yaml` command and export it to a file.
+- Edit the exported YAML file to include the specified changes, then use the `replace` command to update the pod.
+##### 8. Create a new ConfigMap named `cm-3392845`. Use the specified `Data`: (a). `DB_NAME=SQL3322`, (b). `DB_HOST=sql322.mycompany.com` & (c). `DB_PORT=3306`
+- Create a `ConfigMap` using imperative commands with the given specifications.
+##### 9. Create a new Secret named `db-secret-xxdf` with the `secrets` given: (a). `DB_Host=sql01`, (b). `DB_User=root` & (c). `DB_Password=password123`
+- Create a `Secret` using imperative commands with the given specifications.
+##### 10. Update pod `app-sec-kff3345` to run as `Root` user and with the `SYS_TIME` capability.
+- Retrieve the YAML configuration of the `app-sec-kff3345` pod using the `kubectl get pod app-sec-kff3345 -o yaml` command and save it to a file.
+- Edit the saved YAML file to include the specified changes using the Official Kubernetes documentation, then use the `replace` command to update the pod.
+##### 11. Export the logs of the `e-com-1123` pod to the file `/opt/outputs/e-com-1123.logs`. It is in a different namespace. Identify the `namespace` first.
+- First, identify the namespace hosting the `e-com-1123` pod. Then, export the logs of the pod to the `/opt/outputs/e-com-1123.logs` file using the imperative command: `kubectl logs -n <namespace> e-com-1123 > /opt/outputs/e-com-1123.logs`.
+##### 12. Create a `Persistent Volume` with the given specification. Volume Name: `pv-analytics`, Storage: `100Mi`, Access modes: `ReadWriteMany` and Host Path: `/pv/data-analytics`
+- Create a `Persistent Volume` resource using the Official Kubernetes documentation with the specified requirements.
+##### 13. Create a `redis` deployment using the image `redis:alpine` with `1` replica and label `app=redis`. Expose it via a `ClusterIP` service called `redis` on port `6379`. Create a new Ingress Type `NetworkPolicy` called `redis-access` which allows only the pods with label `access=redis` to access the deployment.
+- Create a `Deployment` using imperative commands with the given specifications and verify that all the specifications are met.
+- Expose the `Deployment` via a `Service` using imperative commands with the given specifications.
+- Create a `NetworkPolicy` resource using the Official Kubernetes documentation with the specified requirements.
+##### 14. Create a Pod called `sega` with two containers: (a). `Container:1` Name `tails` with image `busybox` and command `sleep 3600`. (b). `Container:2` Name `sonic` with image `nginx` and Environment variable `NGINX_PORT` with the value `8080`.
+- Create a `Pod` resource using the Official Kubernetes documentation with the specified requirements.
+
+## Mock Exam-2
+##### 1. Create a deployment called `my-webapp` with image: `nginx`, label `tier:frontend` and `2` replicas. Expose the deployment as a `NodePort` service with name `front-end-service` , port: `80` and NodePort: `30083`.
+- Create a `Deployment` using an imperative command and export its configuration to a file using the `--dry-run=client` flag.
+- Edit the exported file to include the specified requirements as per the Official Kubernetes documentation.
+- Expose the `Deployment` via a `Service` using imperative commands with the given specifications.
+##### 2. Add a taint to the node `node01` of the cluster. Use the given specification - key: `app_type`, value: `alpha` and effect: `NoSchedule`. Create a pod called `alpha`, image: `redis` with toleration to `node01`.
+- Add a taint to the node `node01` using the given specifications with an imperative command.
+- Create a `Pod` using an imperative command and export its configuration to a file using the `--dry-run=client` flag.
+- Edit the exported file to include the specified requirements along with `toleration` as per the Official Kubernetes documentation.
+##### 3. Apply a label `app_type=beta` to node `controlplane`. Create a new deployment called `beta-apps` with image: `nginx` and replicas: `3`. Set `Node Affinity` to the deployment to place the PODs on `controlplane` only. NodeAffinity: `requiredDuringSchedulingIgnoredDuringExecution`.
+- Apply the label to the `controlplane` node using an imperative command.
+- Create a `Deployment` using an imperative command and export its configuration to a file using the `--dry-run=client` flag.
+- Edit the exported file to include the specified requirements along with `NodeAffinity`, ensuring the pods are scheduled only on the `controlplane` node, as per the Official Kubernetes documentation.
+##### 4. Create a new Ingress Resource for the service `my-video-service` to be made available at the URL: `http://ckad-mock-exam-solution.com:30093/video`. To create an ingress resource with details - annotation: `nginx.ingress.kubernetes.io/rewrite-target: /`, host: `ckad-mock-exam-solution.com` and path: `/video`. Once set up, the curl test of the URL from the nodes should be successful: `HTTP 200`.
+- Create an `Ingress` resource using either imperative commands or the Official Kubernetes documentation with the specified requirements.
+##### 5. We have deployed a new pod called `pod-with-rprobe`. This Pod has an initial delay before it is Ready. Update the newly created pod `pod-with-rprobe` with a `readinessProbe` using the spec `httpGet` - path: `/ready` and port: `8080`.
+- Retrieve the YAML configuration of the `pod-with-rprobe` pod using the `kubectl get pod pod-with-rprobe -o yaml` command and save it to a file.
+- Edit the saved YAML file to add the `readinessProbe` with the specified configuration, then use the `replace` command to update the pod.
+##### 6. Create a new pod called `nginx1401` in the `default` namespace with the image `nginx`. Add a `livenessProbe` to the container to restart it if the command `ls /var/www/html/probe` fails. This check should start after a delay of `10 seconds` and run every `60 seconds`. You may delete and recreate the object. Ignore the warnings from the probe.
+- Create a `Pod` using an imperative command and export its configuration to a file using the `--dry-run=client` flag.
+- Edit the exported file to add a `livenessProbe` with the specified configuration using the Official Kubernetes documentation.
+##### 7. Create a job called `whalesay` with image `busybox`, command `echo "cowsay I am going to ace CKAD!"`, completions: `10`, backoffLimit: `6` and restartPolicy: `Never`. This simple job runs the popular cowsay game that was modifed by docker.
+- Create a `Job` using an imperative command and save its configuration to a file using the `--dry-run=client` flag.
+- Modify the saved file to include the specified configuration using the Official Kubernetes documentation.
+##### 8. Create a pod called `multi-pod` with two containers. Container:1 - name: `jupiter`, image: `nginx` & Env `type: planet` and Container:2 - name: `europa`, image: `busybox`, command: `sleep 4800` & Env `type: moon`
+- Create a `Pod` using an imperative command and export its configuration to a file using the `--dry-run=client` flag.
+- Edit the exported file to include the specified configuration using the Official Kubernetes documentation.
+##### 9. Create a PersistentVolume called `custom-volume` with size: `50MiB`, reclaim policy:`retain`, Access Modes: `ReadWriteMany` and hostPath: `/opt/data`
+- Create a `Persistent Volume` resource using the Official Kubernetes documentation with the specified requirements.
